@@ -1,6 +1,6 @@
 <h1 align="center">boot-logo<br />
 <div align="center">
-<a href="https://github.com/qemus/boot-logo"><img src="https://raw.githubusercontent.com/qemus/boot-logo/master/.github/logo.png" title="Logo" style="max-width:100%;" width="128" /></a>
+<a href="https://github.com/qemus/boot-logo"><img src="https://raw.githubusercontent.com/qemus/boot-logo/master/.github/logo.png" title="Logo" style="max-width:100%;" width="96" /></a>
 </div>
 <div align="center">
 
@@ -10,20 +10,118 @@
 
 </div></h1>
 
-To be determined
+A small command-line tool for extracting and replacing the boot logo embedded in OVMF firmware.
 
 ## Features ✨
 
-  - To be determined
+- Replaces embedded logos with a custom image
+- Supports BMP, PNG, JPG and JPEG images
+- Preserves all unchanged firmware sections
+- Extracts bitmaps from TianoCore firmware files
+- Available for both AMD64 and ARM64 platforms
 
 ## Usage
 
-To be determined
+### Replace the boot logo
+
+```bash
+boot-logo logo.png firmware.fd
+```
+
+The `replace` command can also be specified explicitly:
+
+```bash
+boot-logo replace logo.png firmware.fd
+```
+
+The input image may be a BMP, PNG, JPG or JPEG file.
+
+By default, the modified firmware is written beside the original:
+
+```text
+firmware.fd
+firmware.boot-logo.fd
+```
+
+Specify a different output path:
+
+```bash
+boot-logo replace logo.jpg firmware.fd --output modified.fd
+```
+
+Overwrite the input firmware:
+
+```bash
+boot-logo replace logo.bmp firmware.fd --in-place
+```
+
+### Extract the boot logo
+
+```bash
+boot-logo extract firmware.fd
+```
+
+By default, the extracted logo is written to:
+
+```text
+firmware.fd.logo.bmp
+```
+
+Specify a different output path:
+
+```bash
+boot-logo extract firmware.fd --output logo.bmp
+```
+
+### Options
+
+```text
+-o, --output <path>  Set the output path
+    --in-place       Overwrite the input firmware
+-h, --help           Show usage information
+-v, --version        Show version information
+```
+
+## Firmware support
+
+The firmware must contain the standard TianoCore `LogoDxe` file:
+
+```text
+F74D20EE-37E7-48FC-97F7-9B1047749C69
+```
+
+The tool expects exactly one valid bitmap inside this file. Firmware that does not match this layout is rejected instead of being modified blindly.
+
+## Installation
+
+Download the binary for your architecture from the [latest release][release_url]:
+
+```text
+boot-logo-amd64.bin
+boot-logo-arm64.bin
+```
+
+Make it executable:
+
+```bash
+chmod +x boot-logo-amd64.bin
+```
+
+Optionally install it system-wide:
+
+```bash
+sudo install -m 755 boot-logo-amd64.bin /usr/local/bin/boot-logo
+```
+
+## Warning
+
+Firmware modification always carries risk. Keep an untouched copy of the original firmware and verify the generated file before using it.
 
 ## Stars 🌟
 
 [![Stargazers](https://raw.githubusercontent.com/star-stats/stars/refs/heads/data/charts/qemus-boot-logo.svg)](https://github.com/qemus/boot-logo/stargazers)
 
+[Fiano]: https://github.com/linuxboot/fiano
 [build_url]: https://github.com/qemus/boot-logo/
 [release_url]: https://github.com/qemus/boot-logo/releases
 
