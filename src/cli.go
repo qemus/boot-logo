@@ -19,7 +19,6 @@ type options struct {
 	imagePath    string
 	firmwarePath string
 	outputPath   string
-	inPlace      bool
 }
 
 func run(args []string) error {
@@ -47,7 +46,10 @@ func run(args []string) error {
 		)
 
 	default:
-		return fmt.Errorf("unsupported command: %s", options.command)
+		return fmt.Errorf(
+			"unsupported command: %s",
+			options.command,
+		)
 	}
 }
 
@@ -74,7 +76,11 @@ func parseOptions(args []string) (options, bool, error) {
 
 		switch {
 		case argument == "--":
-			positional = append(positional, args[index+1:]...)
+			positional = append(
+				positional,
+				args[index+1:]...,
+			)
+
 			index = len(args)
 
 		case argument == "-h" || argument == "--help":
@@ -86,9 +92,6 @@ func parseOptions(args []string) (options, bool, error) {
 			fmt.Fprintln(stdout, Version)
 
 			return options, true, nil
-
-		case argument == "--in-place":
-			options.inPlace = true
 
 		case argument == "-o" || argument == "--output":
 			index++
@@ -121,7 +124,10 @@ func parseOptions(args []string) (options, bool, error) {
 			)
 
 		default:
-			positional = append(positional, argument)
+			positional = append(
+				positional,
+				argument,
+			)
 		}
 	}
 
@@ -138,34 +144,11 @@ func parseOptions(args []string) (options, bool, error) {
 		options.imagePath = positional[0]
 		options.firmwarePath = positional[1]
 
-		if options.inPlace && options.outputPath != "" {
-			return options, false, fmt.Errorf(
-				"--in-place and --output cannot be used together",
-			)
-		}
-
-		if options.inPlace {
+		if options.outputPath == "" {
 			options.outputPath = options.firmwarePath
-		} else if options.outputPath == "" {
-			options.outputPath = defaultReplaceOutput(
-				options.firmwarePath,
-			)
-		}
-
-		if !options.inPlace &&
-			samePath(options.firmwarePath, options.outputPath) {
-			return options, false, fmt.Errorf(
-				"refusing to overwrite the input firmware without --in-place",
-			)
 		}
 
 	case commandExtract:
-		if options.inPlace {
-			return options, false, fmt.Errorf(
-				"--in-place is only valid with replace",
-			)
-		}
-
 		if len(positional) != 1 {
 			printUsage(stderr)
 
@@ -177,10 +160,14 @@ func parseOptions(args []string) (options, bool, error) {
 		options.firmwarePath = positional[0]
 
 		if options.outputPath == "" {
-			options.outputPath = options.firmwarePath + ".logo.bmp"
+			options.outputPath =
+				options.firmwarePath + ".logo.bmp"
 		}
 
-		if samePath(options.firmwarePath, options.outputPath) {
+		if samePath(
+			options.firmwarePath,
+			options.outputPath,
+		) {
 			return options, false, fmt.Errorf(
 				"the extracted image cannot overwrite the firmware",
 			)
@@ -190,27 +177,17 @@ func parseOptions(args []string) (options, bool, error) {
 	return options, false, nil
 }
 
-func defaultReplaceOutput(firmwarePath string) string {
-	extension := filepath.Ext(firmwarePath)
-
-	if extension == "" {
-		return firmwarePath + ".boot-logo"
-	}
-
-	base := strings.TrimSuffix(firmwarePath, extension)
-
-	return base + ".boot-logo" + extension
-}
-
 func samePath(first string, second string) bool {
 	firstPath, firstErr := filepath.Abs(first)
 	secondPath, secondErr := filepath.Abs(second)
 
 	if firstErr != nil || secondErr != nil {
-		return filepath.Clean(first) == filepath.Clean(second)
+		return filepath.Clean(first) ==
+			filepath.Clean(second)
 	}
 
-	return filepath.Clean(firstPath) == filepath.Clean(secondPath)
+	return filepath.Clean(firstPath) ==
+		filepath.Clean(secondPath)
 }
 
 func printUsage(writer io.Writer) {
@@ -227,7 +204,7 @@ func printUsage(writer io.Writer) {
 	fmt.Fprintln(writer, "Commands:")
 	fmt.Fprintln(
 		writer,
-		"  replace    Replace the firmware boot logo (default)",
+		"  replace    Replace the firmware boot logo in-place (default)",
 	)
 	fmt.Fprintln(
 		writer,
@@ -237,11 +214,7 @@ func printUsage(writer io.Writer) {
 	fmt.Fprintln(writer, "Options:")
 	fmt.Fprintln(
 		writer,
-		"  -o, --output <path>  Set the output path",
-	)
-	fmt.Fprintln(
-		writer,
-		"      --in-place       Overwrite the input firmware",
+		"  -o, --output <path>  Write to a different output path",
 	)
 	fmt.Fprintln(
 		writer,
