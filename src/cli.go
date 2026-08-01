@@ -12,6 +12,8 @@ type command string
 const (
 	commandReplace command = "replace"
 	commandExtract command = "extract"
+	commandInfo    command = "info"
+	commandVerify  command = "verify"
 )
 
 type options struct {
@@ -19,6 +21,8 @@ type options struct {
 	imagePath    string
 	firmwarePath string
 	outputPath   string
+	json         bool
+	quiet        bool
 }
 
 func run(args []string) error {
@@ -44,6 +48,21 @@ func run(args []string) error {
 			options.firmwarePath,
 			options.outputPath,
 		)
+
+	case commandInfo:
+		var info firmwareInfo
+
+		info, err = inspectFirmware(options.firmwarePath)
+		if err == nil {
+			err = printFirmwareInfo(
+				stdout,
+				info,
+				options.json,
+			)
+		}
+
+	case commandVerify:
+		err = verifyFirmware(options.firmwarePath)
 
 	default:
 		return fmt.Errorf(
@@ -73,6 +92,14 @@ func parseOptions(args []string) (options, bool, error) {
 
 		case string(commandExtract):
 			options.command = commandExtract
+			args = args[1:]
+
+		case string(commandInfo):
+			options.command = commandInfo
+			args = args[1:]
+
+		case string(commandVerify):
+			options.command = commandVerify
 			args = args[1:]
 		}
 	}
@@ -125,6 +152,12 @@ func parseOptions(args []string) (options, bool, error) {
 				)
 			}
 
+		case argument == "--json":
+			options.json = true
+
+		case argument == "-q" || argument == "--quiet":
+			options.quiet = true
+
 		case strings.HasPrefix(argument, "-"):
 			return options, false, fmt.Errorf(
 				"unknown option: %s",
@@ -137,6 +170,26 @@ func parseOptions(args []string) (options, bool, error) {
 				argument,
 			)
 		}
+	}
+
+	if options.json && options.command != commandInfo {
+		return options, false, fmt.Errorf(
+			"--json is only supported by the info command",
+		)
+	}
+
+	if options.quiet && options.command != commandVerify {
+		return options, false, fmt.Errorf(
+			"--quiet is only supported by the verify command",
+		)
+	}
+
+	if options.outputPath != "" &&
+		options.command != commandReplace &&
+		options.command != commandExtract {
+		return options, false, fmt.Errorf(
+			"--output is only supported by replace and extract",
+		)
 	}
 
 	switch options.command {
@@ -180,6 +233,28 @@ func parseOptions(args []string) (options, bool, error) {
 				"the extracted image cannot overwrite the firmware",
 			)
 		}
+
+	case commandInfo:
+		if len(positional) != 1 {
+			printUsage(stderr)
+
+			return options, false, fmt.Errorf(
+				"info requires a firmware path",
+			)
+		}
+
+		options.firmwarePath = positional[0]
+
+	case commandVerify:
+		if len(positional) != 1 {
+			printUsage(stderr)
+
+			return options, false, fmt.Errorf(
+				"verify requires a firmware path",
+			)
+		}
+
+		options.firmwarePath = positional[0]
 	}
 
 	return options, false, nil
@@ -213,6 +288,15 @@ func printSuccess(writer io.Writer, options options) {
 			"Boot logo extracted successfully: %s\n",
 			options.outputPath,
 		)
+
+	case commandVerify:
+		if !options.quiet {
+			fmt.Fprintf(
+				writer,
+				"Firmware verified successfully: %s\n",
+				options.firmwarePath,
+			)
+		}
 	}
 }
 
@@ -226,6 +310,14 @@ func printUsage(writer io.Writer) {
 		writer,
 		"  boot-logo [options] extract <firmware>",
 	)
+	fmt.Fprintln(
+		writer,
+		"  boot-logo [options] info <firmware>",
+	)
+	fmt.Fprintln(
+		writer,
+		"  boot-logo [options] verify <firmware>",
+	)
 	fmt.Fprintln(writer)
 	fmt.Fprintln(writer, "Commands:")
 	fmt.Fprintln(
@@ -236,11 +328,27 @@ func printUsage(writer io.Writer) {
 		writer,
 		"  extract    Extract the current firmware boot logo",
 	)
+	fmt.Fprintln(
+		writer,
+		"  info       Show firmware and embedded boot logo information",
+	)
+	fmt.Fprintln(
+		writer,
+		"  verify     Verify that the firmware and boot logo are supported",
+	)
 	fmt.Fprintln(writer)
 	fmt.Fprintln(writer, "Options:")
 	fmt.Fprintln(
 		writer,
 		"  -o, --output <path>  Write to a different output path",
+	)
+	fmt.Fprintln(
+		writer,
+		"      --json           Print info as JSON",
+	)
+	fmt.Fprintln(
+		writer,
+		"  -q, --quiet          Suppress successful verify output",
 	)
 	fmt.Fprintln(
 		writer,
