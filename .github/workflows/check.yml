@@ -1,0 +1,52 @@
+on: [workflow_call]
+name: "Check"
+permissions: {}
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        fetch-depth: 1
+
+    - name: Set up Go
+      uses: actions/setup-go@v7
+      with:
+        cache: false
+        go-version-file: 'src/go.mod'
+
+    - name: Run golangci-lint
+      uses: golangci/golangci-lint-action@v9
+      with:
+          version: latest
+          working-directory: src
+
+    - name: Run staticcheck
+      uses: dominikh/staticcheck-action@v1
+      with:
+        version: latest
+        install-go: false
+        working-directory: src
+
+    - name: Run Go vet
+      run: go vet ./...
+      working-directory: src
+
+    - name: Run race detector
+      run: go test -race ./...
+      working-directory: src
+
+    - name: Build binaries
+      run: |
+        CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /tmp/boot-logo-amd64 .
+        CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o /tmp/boot-logo-arm64 .
+      working-directory: src
+  
+    - name: Lint Dockerfile
+      uses: hadolint/hadolint-action@v3.3.0
+      with:
+        dockerfile: Dockerfile
+        ignore: DL3008
+        failure-threshold: warning
