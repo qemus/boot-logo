@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"image"
+	"image/jpeg"
+	"image/png"
 	"os"
 
 	"github.com/linuxboot/fiano/pkg/uefi"
@@ -13,9 +16,32 @@ const (
 	bitmapFileHeaderSize = 14
 	bitmapCoreHeaderSize = 12
 	bitmapInfoHeaderSize = 40
+	bitmapDataOffset     = bitmapFileHeaderSize +
+		bitmapInfoHeaderSize
+
+	maxBitmapDimension = int64(1<<31 - 1)
+	maxBitmapFileSize  = uint64(1<<32 - 1)
 )
 
-var bitmapSignature = []byte{'B', 'M'}
+var (
+	bitmapSignature = []byte{'B', 'M'}
+
+	pngSignature = []byte{
+		0x89,
+		0x50,
+		0x4e,
+		0x47,
+		0x0d,
+		0x0a,
+		0x1a,
+		0x0a,
+	}
+
+	jpegSignature = []byte{
+		0xff,
+		0xd8,
+	}
+)
 
 func readBitmap(path string) ([]byte, error) {
 	data, err := os.ReadFile(path)
@@ -27,20 +53,192 @@ func readBitmap(path string) ([]byte, error) {
 		return nil, fmt.Errorf("image %q is empty", path)
 	}
 
-	location, err := parseBitmapAt(data, 0)
-	if err != nil {
-		return nil, fmt.Errorf("invalid bitmap %q: %w", path, err)
+	switch {
+	case bytes.HasPrefix(data, bitmapSignature):
+		location, err := parseBitmapAt(data, 0)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"invalid bitmap %q: %w",
+				path,
+				err,
+			)
+		}
+
+		if location.length != len(data) {
+			return nil, fmt.Errorf(
+				"invalid bitmap %q: file contains %d trailing bytes",
+				path,
+				len(data)-location.length,
+			)
+		}
+
+		return data, nil
+
+	case bytes.HasPrefix(data, pngSignature):
+		source, err := png.Decode(bytes.NewReader(data))
+		if err != nil {
+			return nil, fmt.Errorf(
+				"decode PNG image %q: %w",
+				path,
+				err,
+			)
+		}
+
+		bitmap, err := encodeBitmap(source)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"convert PNG image %q: %w",
+				path,
+				err,
+			)
+		}
+
+		return bitmap, nil
+
+	case bytes.HasPrefix(data, jpegSignature):
+		source, err := jpeg.Decode(bytes.NewReader(data))
+		if err != nil {
+			return nil, fmt.Errorf(
+				"decode JPEG image %q: %w",
+				path,
+				err,
+			)
+		}
+
+		bitmap, err := encodeBitmap(source)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"convert JPEG image %q: %w",
+				path,
+				err,
+			)
+		}
+
+		return bitmap, nil
+
+	default:
+		return nil, fmt.Errorf(
+			"unsupported image format %q: expected BMP, PNG or JPEG",
+			path,
+		)
+	}
+}
+
+func encodeBitmap(source image.Image) ([]byte, error) {
+	if source == nil {
+		return nil, fmt.Errorf("image is nil")
 	}
 
-	if location.length != len(data) {
+	bounds := source.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+
+	if width <= 0 || height <= 0 {
 		return nil, fmt.Errorf(
-			"invalid bitmap %q: file contains %d trailing bytes",
-			path,
-			len(data)-location.length,
+			"image dimensions must be greater than zero",
 		)
 	}
 
-	return data, nil
+	if int64(width) > maxBitmapDimension ||
+		int64(height) > maxBitmapDimension {
+		return nil, fmt.Errorf(
+			"image dimensions are too large: %dx%d",
+			width,
+			height,
+		)
+	}
+
+	width64 := uint64(width)
+	height64 := uint64(height)
+
+	rowSize := ((width64*3 + 3) / 4) * 4
+	pixelSize := rowSize * height64
+	fileSize := uint64(bitmapDataOffset) + pixelSize
+
+	if fileSize > maxBitmapFileSize {
+		return nil, fmt.Errorf(
+			"converted bitmap is too large: %d bytes",
+			fileSize,
+		)
+	}
+
+	maximumInt := uint64(^uint(0) >> 1)
+
+	if fileSize > maximumInt {
+		return nil, fmt.Errorf(
+			"converted bitmap exceeds the platform size limit",
+		)
+	}
+
+	bitmap := make([]byte, int(fileSize))
+
+	copy(bitmap[0:2], bitmapSignature)
+
+	binary.LittleEndian.PutUint32(
+		bitmap[2:6],
+		uint32(fileSize),
+	)
+
+	binary.LittleEndian.PutUint32(
+		bitmap[10:14],
+		bitmapDataOffset,
+	)
+
+	binary.LittleEndian.PutUint32(
+		bitmap[14:18],
+		bitmapInfoHeaderSize,
+	)
+
+	binary.LittleEndian.PutUint32(
+		bitmap[18:22],
+		uint32(width),
+	)
+
+	binary.LittleEndian.PutUint32(
+		bitmap[22:26],
+		uint32(height),
+	)
+
+	binary.LittleEndian.PutUint16(
+		bitmap[26:28],
+		1,
+	)
+
+	binary.LittleEndian.PutUint16(
+		bitmap[28:30],
+		24,
+	)
+
+	binary.LittleEndian.PutUint32(
+		bitmap[34:38],
+		uint32(pixelSize),
+	)
+
+	rowLength := int(rowSize)
+
+	for destinationY := 0; destinationY < height; destinationY++ {
+		sourceY := bounds.Min.Y + height - destinationY - 1
+
+		rowOffset := bitmapDataOffset +
+			destinationY*rowLength
+
+		for x := 0; x < width; x++ {
+			sourceX := bounds.Min.X + x
+
+			red, green, blue, _ := source.At(
+				sourceX,
+				sourceY,
+			).RGBA()
+
+			pixelOffset := rowOffset + x*3
+
+			bitmap[pixelOffset] = byte(blue >> 8)
+			bitmap[pixelOffset+1] = byte(green >> 8)
+			bitmap[pixelOffset+2] = byte(red >> 8)
+		}
+	}
+
+	return bitmap, nil
 }
 
 func findEmbeddedBitmaps(
@@ -78,9 +276,15 @@ func parseBitmapAt(
 	data []byte,
 	offset int,
 ) (bitmapLocation, error) {
-	if offset < 0 || offset > len(data)-bitmapFileHeaderSize {
+	if offset < 0 || offset > len(data) {
 		return bitmapLocation{}, fmt.Errorf(
-			"bitmap header is outside the available data",
+			"bitmap offset is outside the available data",
+		)
+	}
+
+	if len(data)-offset < bitmapFileHeaderSize+4 {
+		return bitmapLocation{}, fmt.Errorf(
+			"bitmap header is incomplete",
 		)
 	}
 
@@ -143,6 +347,12 @@ func parseBitmapAt(
 	)
 
 	if dibSize == bitmapCoreHeaderSize {
+		if headerEnd < 26 {
+			return bitmapLocation{}, fmt.Errorf(
+				"bitmap core header is incomplete",
+			)
+		}
+
 		width = uint64(binary.LittleEndian.Uint16(
 			bitmap[18:20],
 		))
@@ -164,13 +374,23 @@ func parseBitmapAt(
 			paletteSize = colorsUsed * 3
 		}
 	} else {
-		widthValue := int64(int32(binary.LittleEndian.Uint32(
-			bitmap[18:22],
-		)))
+		if headerEnd < bitmapDataOffset {
+			return bitmapLocation{}, fmt.Errorf(
+				"bitmap information header is incomplete",
+			)
+		}
 
-		heightValue := int64(int32(binary.LittleEndian.Uint32(
-			bitmap[22:26],
-		)))
+		widthValue := int64(int32(
+			binary.LittleEndian.Uint32(
+				bitmap[18:22],
+			),
+		))
+
+		heightValue := int64(int32(
+			binary.LittleEndian.Uint32(
+				bitmap[22:26],
+			),
+		))
 
 		if widthValue <= 0 {
 			return bitmapLocation{}, fmt.Errorf(
@@ -211,11 +431,9 @@ func parseBitmapAt(
 			)
 		}
 
-		if dibSize >= bitmapInfoHeaderSize {
-			colorsUsed = uint64(binary.LittleEndian.Uint32(
-				bitmap[46:50],
-			))
-		}
+		colorsUsed = uint64(binary.LittleEndian.Uint32(
+			bitmap[46:50],
+		))
 
 		if bitsPerPixel <= 8 {
 			maximumColors := uint64(1) << bitsPerPixel
@@ -273,9 +491,16 @@ func parseBitmapAt(
 
 	rowBits := width * uint64(bitsPerPixel)
 	rowSize := ((rowBits + 31) / 32) * 4
-	pixelSize := rowSize * height
 
-	if pixelSize > fileSize-pixelOffset {
+	if rowSize == 0 {
+		return bitmapLocation{}, fmt.Errorf(
+			"invalid bitmap row size",
+		)
+	}
+
+	availablePixelData := fileSize - pixelOffset
+
+	if height > availablePixelData/rowSize {
 		return bitmapLocation{}, fmt.Errorf(
 			"pixel data exceeds bitmap size",
 		)
