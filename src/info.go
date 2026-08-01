@@ -216,8 +216,13 @@ func hiiImageDepth(
 }
 
 func imageDepth(source image.Image) int {
-	_ = source
-
-	// PNG and JPEG images are decoded to RGB for replacement.
-	return 24
+	switch source.(type) {
+	case *image.NRGBA, *image.RGBA, *image.NRGBA64, *image.RGBA64:
+		return 32
+	case *image.Gray, *image.Gray16, *image.Paletted:
+		return 8
+	default:
+		// Best-effort fallback for formats like JPEG (*image.YCbCr).
+		return 24
+	}
 }
