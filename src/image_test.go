@@ -749,7 +749,7 @@ func testBitmap(
 		bitsPerPixel   = uint32(24)
 	)
 
-	rowBits := uint64(width) * bitsPerPixel
+	rowBits := uint64(width) * uint64(bitsPerPixel)
 	rowSize := uint32(((rowBits + 31) / 32) * 4)
 	pixelSize := rowSize * height
 	fileSize := pixelOffset + pixelSize
