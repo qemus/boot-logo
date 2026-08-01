@@ -6,3 +6,9 @@ require (
 	github.com/google/renameio/v2 v2.0.2
 	github.com/linuxboot/fiano v1.2.0
 )
+
+require (
+	github.com/pierrec/lz4 v2.6.1+incompatible // indirect
+	github.com/ulikunitz/xz v0.5.11 // indirect
+	golang.org/x/text v0.6.0 // indirect
+)
