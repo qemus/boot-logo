@@ -143,12 +143,6 @@ The command exits with a non-zero status and prints an error when verification f
 -v, --version        Show version information
 ```
 
-`--output` is supported by the `replace` and `extract` commands.
-
-`--json` is supported only by the `info` command.
-
-`--quiet` is supported only by the `verify` command.
-
 ## Firmware support
 
 The tool supports complete OVMF firmware images and standalone FFS files containing the standard TianoCore `LogoDxe` file:
