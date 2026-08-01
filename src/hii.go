@@ -836,10 +836,7 @@ func decodeHIIPaletteImage(
 	rowBytes := (width*int(bitsPerPixel) + 7) / 8
 
 	for y := 0; y < height; y++ {
-		row := pixels[
-			y*rowBytes :
-				(y+1)*rowBytes
-		]
+		row := pixels[y*rowBytes : (y+1)*rowBytes]
 
 		for x := 0; x < width; x++ {
 			var paletteIndex int
@@ -1104,10 +1101,7 @@ func replaceHIIImage(
 	}
 
 	packageHeader := binary.LittleEndian.Uint32(
-		newList[
-			packageRelativeOffset :
-				packageRelativeOffset+hiiPackageHeaderSize
-		],
+		newList[packageRelativeOffset : packageRelativeOffset+hiiPackageHeaderSize],
 	)
 
 	packageHeader =
@@ -1115,10 +1109,7 @@ func replaceHIIImage(
 			uint32(newPackageLength)
 
 	binary.LittleEndian.PutUint32(
-		newList[
-			packageRelativeOffset :
-				packageRelativeOffset+hiiPackageHeaderSize
-		],
+		newList[packageRelativeOffset:packageRelativeOffset+hiiPackageHeaderSize],
 		packageHeader,
 	)
 
@@ -1142,10 +1133,7 @@ func replaceHIIImage(
 				packageRelativeOffset + 8
 
 			binary.LittleEndian.PutUint32(
-				newList[
-					paletteFieldOffset :
-						paletteFieldOffset+4
-				],
+				newList[paletteFieldOffset:paletteFieldOffset+4],
 				uint32(newPaletteOffset),
 			)
 		}
@@ -1291,17 +1279,11 @@ func findHIIResource(
 	fileHeaderOffset := peOffset + 4
 
 	numberOfSections := int(binary.LittleEndian.Uint16(
-		data[
-			fileHeaderOffset+2 :
-				fileHeaderOffset+4
-		],
+		data[fileHeaderOffset+2 : fileHeaderOffset+4],
 	))
 
 	optionalHeaderSize := int(binary.LittleEndian.Uint16(
-		data[
-			fileHeaderOffset+16 :
-				fileHeaderOffset+18
-		],
+		data[fileHeaderOffset+16 : fileHeaderOffset+18],
 	))
 
 	optionalOffset :=
@@ -1318,10 +1300,7 @@ func findHIIResource(
 	}
 
 	magic := binary.LittleEndian.Uint16(
-		data[
-			optionalOffset :
-				optionalOffset+2
-		],
+		data[optionalOffset : optionalOffset+2],
 	)
 
 	var (
@@ -1358,10 +1337,7 @@ func findHIIResource(
 	}
 
 	numberOfDirectories := binary.LittleEndian.Uint32(
-		data[
-			numberOfDirectoriesOffset :
-				numberOfDirectoriesOffset+4
-		],
+		data[numberOfDirectoriesOffset:numberOfDirectoriesOffset+4],
 	)
 
 	if numberOfDirectories <= peResourceDirectoryIndex {
@@ -1380,17 +1356,11 @@ func findHIIResource(
 	}
 
 	resourceRVA := binary.LittleEndian.Uint32(
-		data[
-			resourceDirectoryEntryOffset :
-				resourceDirectoryEntryOffset+4
-		],
+		data[resourceDirectoryEntryOffset:resourceDirectoryEntryOffset+4],
 	)
 
 	resourceDirectorySize := binary.LittleEndian.Uint32(
-		data[
-			resourceDirectoryEntryOffset+4 :
-				resourceDirectoryEntryOffset+8
-		],
+		data[resourceDirectoryEntryOffset+4:resourceDirectoryEntryOffset+8],
 	)
 
 	if resourceRVA == 0 ||
@@ -1406,17 +1376,11 @@ func findHIIResource(
 	}
 
 	sectionAlignment := binary.LittleEndian.Uint32(
-		data[
-			optionalOffset+32 :
-				optionalOffset+36
-		],
+		data[optionalOffset+32 : optionalOffset+36],
 	)
 
 	fileAlignment := binary.LittleEndian.Uint32(
-		data[
-			optionalOffset+36 :
-				optionalOffset+40
-		],
+		data[optionalOffset+36 : optionalOffset+40],
 	)
 
 	if sectionAlignment == 0 ||
@@ -1481,17 +1445,11 @@ func findHIIResource(
 	}
 
 	dataRVA := binary.LittleEndian.Uint32(
-		data[
-			hiiEntryOffset :
-				hiiEntryOffset+4
-		],
+		data[hiiEntryOffset : hiiEntryOffset+4],
 	)
 
 	dataSize := int(binary.LittleEndian.Uint32(
-		data[
-			hiiEntryOffset+4 :
-				hiiEntryOffset+8
-		],
+		data[hiiEntryOffset+4 : hiiEntryOffset+8],
 	))
 
 	if dataSize <= 0 {
@@ -1599,34 +1557,22 @@ func parsePESections(
 
 			virtualSize:
 				binary.LittleEndian.Uint32(
-					data[
-						headerOffset+8 :
-							headerOffset+12
-					],
+					data[headerOffset+8 : headerOffset+12],
 				),
 
 			virtualAddress:
 				binary.LittleEndian.Uint32(
-					data[
-						headerOffset+12 :
-							headerOffset+16
-					],
+					data[headerOffset+12 : headerOffset+16],
 				),
 
 			rawSize:
 				binary.LittleEndian.Uint32(
-					data[
-						headerOffset+16 :
-							headerOffset+20
-					],
+					data[headerOffset+16 : headerOffset+20],
 				),
 
 			rawOffset:
 				binary.LittleEndian.Uint32(
-					data[
-						headerOffset+20 :
-							headerOffset+24
-					],
+					data[headerOffset+20 : headerOffset+24],
 				),
 		}
 
@@ -1730,10 +1676,7 @@ func findHIIResourceEntry(
 	}
 
 	value := binary.LittleEndian.Uint32(
-		data[
-			entryOffset+4 :
-				entryOffset+8
-		],
+		data[entryOffset+4 : entryOffset+8],
 	)
 
 	for depth := 0; depth < 8; depth++ {
@@ -1769,10 +1712,7 @@ func findHIIResourceEntry(
 		}
 
 		value = binary.LittleEndian.Uint32(
-			data[
-				nextEntry+4 :
-					nextEntry+8
-			],
+			data[nextEntry+4 : nextEntry+8],
 		)
 	}
 
@@ -1797,17 +1737,11 @@ func findNamedPEResourceEntry(
 	}
 
 	namedEntries := int(binary.LittleEndian.Uint16(
-		data[
-			directory+12 :
-				directory+14
-		],
+		data[directory+12 : directory+14],
 	))
 
 	idEntries := int(binary.LittleEndian.Uint16(
-		data[
-			directory+14 :
-				directory+16
-		],
+		data[directory+14 : directory+16],
 	))
 
 	totalEntries := namedEntries + idEntries
@@ -1831,10 +1765,7 @@ func findNamedPEResourceEntry(
 				index*peResourceDirectoryEntrySize
 
 		nameValue := binary.LittleEndian.Uint32(
-			data[
-				entryOffset :
-					entryOffset+4
-			],
+			data[entryOffset : entryOffset+4],
 		)
 
 		if nameValue&0x80000000 == 0 {
@@ -1880,17 +1811,11 @@ func firstPEResourceDirectoryEntry(
 	}
 
 	namedEntries := int(binary.LittleEndian.Uint16(
-		data[
-			directory+12 :
-				directory+14
-		],
+		data[directory+12 : directory+14],
 	))
 
 	idEntries := int(binary.LittleEndian.Uint16(
-		data[
-			directory+14 :
-				directory+16
-		],
+		data[directory+14 : directory+16],
 	))
 
 	if namedEntries+idEntries == 0 {
@@ -1930,10 +1855,7 @@ func readPEResourceName(
 	}
 
 	length := int(binary.LittleEndian.Uint16(
-		data[
-			offset :
-				offset+2
-		],
+		data[offset : offset+2],
 	))
 
 	stringEnd64 :=
@@ -1957,10 +1879,7 @@ func readPEResourceName(
 			offset + 2 + index*2
 
 		value := binary.LittleEndian.Uint16(
-			data[
-				characterOffset :
-					characterOffset+2
-			],
+			data[characterOffset : characterOffset+2],
 		)
 
 		runes = append(
@@ -2026,10 +1945,7 @@ func replacePEResourceData(
 
 	if resourceRelativeEnd < virtualLimit &&
 		containsNonZero(
-			data[
-				rawStart+resourceRelativeEnd :
-					rawStart+virtualLimit
-			],
+			data[rawStart+resourceRelativeEnd : rawStart+virtualLimit],
 		) {
 		return nil, fmt.Errorf(
 			"HII resource is not the final object in its PE section",
@@ -2105,47 +2021,30 @@ func replacePEResourceData(
 	)
 
 	copy(
-		output[
-			rawStart :
-				rawStart+resourceRelativeStart
-		],
-		data[
-			rawStart :
-				rawStart+resourceRelativeStart
-		],
+		output[rawStart:rawStart+resourceRelativeStart],
+		data[rawStart:rawStart+resourceRelativeStart],
 	)
 
 	copy(
 		output[
-			rawStart+resourceRelativeStart :
-				rawStart+resourceRelativeStart+
-					len(newResource)
+			rawStart+resourceRelativeStart:
+				rawStart+resourceRelativeStart+len(newResource)
 		],
 		newResource,
 	)
 
 	copy(
-		output[
-			rawStart+newRawSize :
-		],
-		data[
-			oldRawEnd :
-		],
+		output[rawStart+newRawSize:],
+		data[oldRawEnd:],
 	)
 
 	binary.LittleEndian.PutUint32(
-		output[
-			section.headerOffset+8 :
-				section.headerOffset+12
-		],
+		output[section.headerOffset+8:section.headerOffset+12],
 		uint32(newVirtualSize),
 	)
 
 	binary.LittleEndian.PutUint32(
-		output[
-			section.headerOffset+16 :
-				section.headerOffset+20
-		],
+		output[section.headerOffset+16:section.headerOffset+20],
 		uint32(newRawSize),
 	)
 
@@ -2167,20 +2066,14 @@ func replacePEResourceData(
 			}
 
 			binary.LittleEndian.PutUint32(
-				output[
-					other.headerOffset+20 :
-						other.headerOffset+24
-				],
+				output[other.headerOffset+20:other.headerOffset+24],
 				uint32(newRawOffset64),
 			)
 		}
 	}
 
 	binary.LittleEndian.PutUint32(
-		output[
-			resource.dataEntryOffset+4 :
-				resource.dataEntryOffset+8
-		],
+		output[resource.dataEntryOffset+4:resource.dataEntryOffset+8],
 		uint32(len(newResource)),
 	)
 
@@ -2201,17 +2094,14 @@ func replacePEResourceData(
 	}
 
 	binary.LittleEndian.PutUint32(
-		output[
-			resource.directorySizeOffset :
-				resource.directorySizeOffset+4
-		],
+		output[resource.directorySizeOffset:resource.directorySizeOffset+4],
 		uint32(newDirectorySize),
 	)
 
 	oldInitializedSize := int64(
 		binary.LittleEndian.Uint32(
 			output[
-				resource.sizeOfInitializedDataOffset :
+				resource.sizeOfInitializedDataOffset:
 					resource.sizeOfInitializedDataOffset+4
 			],
 		),
@@ -2231,7 +2121,7 @@ func replacePEResourceData(
 
 	binary.LittleEndian.PutUint32(
 		output[
-			resource.sizeOfInitializedDataOffset :
+			resource.sizeOfInitializedDataOffset:
 				resource.sizeOfInitializedDataOffset+4
 		],
 		uint32(newInitializedSize),
@@ -2248,18 +2138,12 @@ func replacePEResourceData(
 	}
 
 	binary.LittleEndian.PutUint32(
-		output[
-			resource.sizeOfImageOffset :
-				resource.sizeOfImageOffset+4
-		],
+		output[resource.sizeOfImageOffset:resource.sizeOfImageOffset+4],
 		newSizeOfImage,
 	)
 
 	binary.LittleEndian.PutUint32(
-		output[
-			resource.checksumOffset :
-				resource.checksumOffset+4
-		],
+		output[resource.checksumOffset:resource.checksumOffset+4],
 		0,
 	)
 
