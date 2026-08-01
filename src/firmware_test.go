@@ -155,6 +155,88 @@ func TestFindBootLogoIgnoresInvalidBitmapSignature(t *testing.T) {
 	}
 }
 
+func TestParseStandaloneFFS(t *testing.T) {
+	image := testBitmap(4, 3)
+	data := testStandaloneFFS(t, image)
+
+	file, ok := parseStandaloneFFS(data)
+	if !ok {
+		t.Fatal("parseStandaloneFFS() rejected a valid FFS file")
+	}
+
+	if file.Header.GUID != logoFileGUID {
+		t.Fatalf(
+			"parsed GUID = %s, want %s",
+			file.Header.GUID.String(),
+			logoFileGUID.String(),
+		)
+	}
+
+	match, err := findBootLogo(file)
+	if err != nil {
+		t.Fatalf("findBootLogo() returned an error: %v", err)
+	}
+
+	start := match.location.offset
+	end := start + match.location.length
+	actual := match.section.Buf()[start:end]
+
+	if !bytes.Equal(actual, image) {
+		t.Fatal("parsed FFS contains the wrong bitmap")
+	}
+}
+
+func TestParseStandaloneFFSRejectsTrailingData(t *testing.T) {
+	data := testStandaloneFFS(t, testBitmap(2, 2))
+	data = append(data, 0xff)
+
+	if _, ok := parseStandaloneFFS(data); ok {
+		t.Fatal("parseStandaloneFFS() accepted trailing data")
+	}
+}
+
+func TestParseStandaloneFFSRejectsShortData(t *testing.T) {
+	data := make([]byte, uefi.FileHeaderMinLength-1)
+
+	if _, ok := parseStandaloneFFS(data); ok {
+		t.Fatal("parseStandaloneFFS() accepted incomplete data")
+	}
+}
+
+func TestReadFirmwareParsesStandaloneFFS(t *testing.T) {
+	data := testStandaloneFFS(t, testBitmap(3, 2))
+	path := filepath.Join(t.TempDir(), "LogoDxe.ffs")
+
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("WriteFile() returned an error: %v", err)
+	}
+
+	firmware, err := readFirmware(path)
+	if err != nil {
+		t.Fatalf("readFirmware() returned an error: %v", err)
+	}
+
+	file, ok := firmware.(*uefi.File)
+	if !ok {
+		t.Fatalf(
+			"readFirmware() returned %T, want *uefi.File",
+			firmware,
+		)
+	}
+
+	if file.Header.GUID != logoFileGUID {
+		t.Fatalf(
+			"parsed GUID = %s, want %s",
+			file.Header.GUID.String(),
+			logoFileGUID.String(),
+		)
+	}
+
+	if _, err := findBootLogo(file); err != nil {
+		t.Fatalf("findBootLogo() returned an error: %v", err)
+	}
+}
+
 func TestReadFirmwareRejectsEmptyFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "empty.fd")
 
@@ -334,4 +416,37 @@ func testRawSection(
 	}
 
 	return section
+}
+
+func testStandaloneFFS(
+	t *testing.T,
+	image []byte,
+) []byte {
+	t.Helper()
+
+	section := testRawSection(t, image)
+	file := testLogoFile(section)
+
+	file.Header.Type = uefi.FVFileTypeDriver
+	file.Type = file.Header.Type.String()
+
+	fileSize := uint64(
+		uefi.FileHeaderMinLength + len(section.Buf()),
+	)
+
+	file.SetSize(fileSize, true)
+
+	if err := file.ChecksumAndAssemble(
+		section.Buf(),
+	); err != nil {
+		t.Fatalf(
+			"ChecksumAndAssemble() returned an error: %v",
+			err,
+		)
+	}
+
+	data := make([]byte, len(file.Buf()))
+	copy(data, file.Buf())
+
+	return data
 }
