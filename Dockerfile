@@ -2,31 +2,16 @@
 
 FROM --platform=$BUILDPLATFORM golang:1.25.7-alpine AS builder
 
-RUN apk --no-cache add \
-    ca-certificates \
-    unzip \
-    wget
+COPY src/go.mod src/go.sum /src/boot-logo/
 
-ARG FIANO_VERSION="1.2.0"
+WORKDIR /src/boot-logo
 
-RUN wget -q \
-      "https://github.com/qemus/fiano/releases/download/v${FIANO_VERSION}/module.zip" \
-      -O /tmp/fiano.zip \
-    && unzip -q /tmp/fiano.zip -d /src \
-    && rm /tmp/fiano.zip \
-    && test -f /src/fiano/go.mod \
-    && grep -Fxq \
-      "module github.com/linuxboot/fiano" \
-      /src/fiano/go.mod
+RUN go mod download
 
 COPY tests/ /src/tests/
 COPY src/ /src/boot-logo/
 
-WORKDIR /src/boot-logo
-
-RUN go mod edit \
-      -replace=github.com/linuxboot/fiano=/src/fiano \
-    && go mod tidy \
+RUN go mod tidy \
     && go test ./...
 
 ARG VERSION_ARG="0.0"

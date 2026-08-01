@@ -24,6 +24,25 @@ jobs:
           go-version-file: src/go.mod
 
       -
+        name: Generate Go module files
+        working-directory: src
+        run: |
+          set -Eeuo pipefail
+
+          go mod tidy
+
+          echo "===== BEGIN src/go.mod ====="
+          cat go.mod
+          echo "===== END src/go.mod ====="
+
+          echo "===== BEGIN src/go.sum ====="
+          cat go.sum
+          echo "===== END src/go.sum ====="
+
+          echo "===== MODULE DIFF ====="
+          git diff -- go.mod go.sum || true
+
+      -
         name: Check Go syntax
         run: |
           find . -type f -name '*.go' -print0 |

@@ -33,14 +33,14 @@ func run(args []string) error {
 
 	switch options.command {
 	case commandReplace:
-		return replaceBootLogo(
+		err = replaceBootLogo(
 			options.imagePath,
 			options.firmwarePath,
 			options.outputPath,
 		)
 
 	case commandExtract:
-		return extractBootLogo(
+		err = extractBootLogo(
 			options.firmwarePath,
 			options.outputPath,
 		)
@@ -51,6 +51,14 @@ func run(args []string) error {
 			options.command,
 		)
 	}
+
+	if err != nil {
+		return err
+	}
+
+	printSuccess(stdout, options)
+
+	return nil
 }
 
 func parseOptions(args []string) (options, bool, error) {
@@ -188,6 +196,24 @@ func samePath(first string, second string) bool {
 
 	return filepath.Clean(firstPath) ==
 		filepath.Clean(secondPath)
+}
+
+func printSuccess(writer io.Writer, options options) {
+	switch options.command {
+	case commandReplace:
+		fmt.Fprintf(
+			writer,
+			"Boot logo replaced successfully: %s\n",
+			options.outputPath,
+		)
+
+	case commandExtract:
+		fmt.Fprintf(
+			writer,
+			"Boot logo extracted successfully: %s\n",
+			options.outputPath,
+		)
+	}
 }
 
 func printUsage(writer io.Writer) {
