@@ -46,22 +46,13 @@ func replaceBootLogo(
 		return err
 	}
 
-	sectionData := match.section.Buf()
-	start := match.location.offset
-	end := start + match.location.length
-
-	updated := make(
-		[]byte,
-		0,
-		len(sectionData)-match.location.length+len(image),
-	)
-
-	updated = append(updated, sectionData[:start]...)
-	updated = append(updated, image...)
-	updated = append(updated, sectionData[end:]...)
-
-	match.section.SetBuf(updated)
-	match.section.Modified = true
+	if err := replaceEmbeddedBitmap(
+		match.section,
+		match.location,
+		image,
+	); err != nil {
+		return err
+	}
 
 	assembler := &visitors.Assemble{}
 
