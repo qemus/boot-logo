@@ -19,7 +19,6 @@ A small command-line utility for extracting and replacing the boot logo embedded
 - Preserves all unchanged firmware sections
 - Extracts bitmaps from firmware and FFS files
 - Displays firmware and embedded logo information
-- Verifies firmware compatibility without modifying it
 - Available for both AMD64 and ARM64 platforms
 
 ## Usage
