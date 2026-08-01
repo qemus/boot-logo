@@ -74,16 +74,37 @@ func replaceBootLogo(
 		)
 	}
 
-	/*
-		Fiano's assembler expects a modified leaf section to contain
-		only its payload. It generates the section header during
-		assembly.
+	replacer := &visitors.ReplacePE32{
+		Predicate: func(candidate uefi.Firmware) bool {
+			file, ok := candidate.(*uefi.File)
+			if !ok {
+				return false
+			}
 
-		Keeping the old section header here would cause a second
-		header to be prepended.
-	*/
-	match.section.SetBuf(updatedPE)
-	match.section.Modified = true
+			return file.Header.GUID == logoFileGUID
+		},
+		NewPE32: updatedPE,
+	}
+
+	if err := replacer.Run(firmware); err != nil {
+		return fmt.Errorf(
+			"replace LogoDxe PE32 section: %w",
+			err,
+		)
+	}
+
+	if len(replacer.Matches) == 0 {
+		return fmt.Errorf(
+			"LogoDxe PE32 section was not replaced",
+		)
+	}
+
+	if len(replacer.Matches) > 1 {
+		return fmt.Errorf(
+			"multiple LogoDxe PE32 sections were replaced: %d",
+			len(replacer.Matches),
+		)
+	}
 
 	assembler := &visitors.Assemble{}
 
