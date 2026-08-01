@@ -24,6 +24,16 @@ jobs:
           go-version-file: src/go.mod
 
       -
+        name: Generate go.sum
+        working-directory: src
+        run: |
+          go mod tidy
+
+          echo "===== BEGIN src/go.sum ====="
+          cat go.sum
+          echo "===== END src/go.sum ====="
+
+      -
         name: Check Go syntax
         run: |
           find . -type f -name '*.go' -print0 |
