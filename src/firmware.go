@@ -106,6 +106,16 @@ func replaceBootLogo(
 		)
 	}
 
+	matchedFile, ok := replacer.Matches[0].(*uefi.File)
+	if !ok {
+		return fmt.Errorf(
+			"matched LogoDxe object is %T, want *uefi.File",
+			replacer.Matches[0],
+		)
+	}
+
+	matchedFile.Modified = true
+
 	assembler := &visitors.Assemble{}
 
 	if err := assembler.Run(firmware); err != nil {
