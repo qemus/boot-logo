@@ -128,11 +128,10 @@ func replaceBootLogo(
 		return err
 	}
 
-	if err := renameio.WriteFile(
+	if err := writeFileAtomic(
 		outputPath,
 		output,
 		mode,
-		renameio.IgnoreUmask(),
 	); err != nil {
 		return fmt.Errorf(
 			"write firmware: %w",
@@ -181,11 +180,10 @@ func extractBootLogo(
 		)
 	}
 
-	if err := renameio.WriteFile(
+	if err := writeFileAtomic(
 		outputPath,
 		bitmap,
 		0o644,
-		renameio.IgnoreUmask(),
 	); err != nil {
 		return fmt.Errorf(
 			"write image: %w",
@@ -432,4 +430,17 @@ func fileMode(
 	}
 
 	return info.Mode().Perm(), nil
+}
+
+func writeFileAtomic(
+	path string,
+	data []byte,
+	mode os.FileMode,
+) error {
+	return renameio.WriteFile(
+		path,
+		data,
+		mode,
+		renameio.IgnoreUmask(),
+	)
 }
