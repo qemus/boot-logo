@@ -94,19 +94,8 @@ func inspectFirmware(path string) (firmwareInfo, error) {
 }
 
 func verifyFirmware(path string) error {
-	info, err := inspectFirmware(path)
-	if err != nil {
-		return err
-	}
-
-	if !info.ReplacementSupported {
-		return fmt.Errorf(
-			"firmware %q does not contain a replaceable boot logo",
-			path,
-		)
-	}
-
-	return nil
+	_, err := inspectFirmware(path)
+	return err
 }
 
 func printFirmwareInfo(
