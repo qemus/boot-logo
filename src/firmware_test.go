@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"image"
+	"image/color"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,158 +12,458 @@ import (
 	"github.com/linuxboot/fiano/pkg/uefi"
 )
 
-func TestFindBootLogo(t *testing.T) {
-	image := testBitmap(4, 3)
-	section := testRawSection(t, image)
-	file := testLogoFile(section)
+var firmwareFixtures = []struct {
+	name string
+	file string
+}{
+	{
+		name: "standalone FFS",
+		file: "test.ffs",
+	},
+	{
+		name: "complete ROM",
+		file: "test.rom",
+	},
+}
 
-	match, err := findBootLogo(file)
-	if err != nil {
-		t.Fatalf("findBootLogo() returned an error: %v", err)
-	}
+func TestReadFirmwareFixtures(t *testing.T) {
+	for _, fixture := range firmwareFixtures {
+		t.Run(fixture.name, func(t *testing.T) {
+			path := fixturePath(fixture.file)
 
-	if match.section != section {
-		t.Fatal("findBootLogo() returned the wrong section")
-	}
+			if _, err := os.Stat(path); err != nil {
+				t.Fatalf(
+					"fixture %q is unavailable: %v",
+					path,
+					err,
+				)
+			}
 
-	start := match.location.offset
-	end := start + match.location.length
+			firmware, err := readFirmware(path)
+			if err != nil {
+				t.Fatalf(
+					"readFirmware() returned an error: %v",
+					err,
+				)
+			}
 
-	if start < 0 || end > len(section.Buf()) {
-		t.Fatalf(
-			"bitmap location [%d:%d] is outside section of size %d",
-			start,
-			end,
-			len(section.Buf()),
-		)
-	}
-
-	if !bytes.Equal(section.Buf()[start:end], image) {
-		t.Fatal("located bitmap does not match the embedded image")
+			if firmware == nil {
+				t.Fatal(
+					"readFirmware() returned nil",
+				)
+			}
+		})
 	}
 }
 
-func TestFindBootLogoInNestedSection(t *testing.T) {
-	image := testBitmap(3, 2)
-	rawSection := testRawSection(t, image)
+func TestFindBootLogoFixtures(t *testing.T) {
+	for _, fixture := range firmwareFixtures {
+		t.Run(fixture.name, func(t *testing.T) {
+			firmware, err := readFirmware(
+				fixturePath(fixture.file),
+			)
+			if err != nil {
+				t.Fatalf(
+					"readFirmware() returned an error: %v",
+					err,
+				)
+			}
 
-	containerSection := &uefi.Section{
-		Encapsulated: []*uefi.TypedFirmware{
-			uefi.MakeTyped(rawSection),
-		},
-	}
+			match, err := findBootLogo(firmware)
+			if err != nil {
+				t.Fatalf(
+					"findBootLogo() returned an error: %v",
+					err,
+				)
+			}
 
-	file := testLogoFile(containerSection)
+			if match.section == nil {
+				t.Fatal(
+					"findBootLogo() returned a nil section",
+				)
+			}
 
-	match, err := findBootLogo(file)
-	if err != nil {
-		t.Fatalf("findBootLogo() returned an error: %v", err)
-	}
+			if match.section.Header.Type != uefi.SectionTypePE32 {
+				t.Fatalf(
+					"section type = %s, want %s",
+					match.section.Header.Type.String(),
+					uefi.SectionTypePE32.String(),
+				)
+			}
 
-	if match.section != rawSection {
-		t.Fatal("findBootLogo() did not return the nested raw section")
+			payload, err := sectionPayload(
+				match.section,
+			)
+			if err != nil {
+				t.Fatalf(
+					"sectionPayload() returned an error: %v",
+					err,
+				)
+			}
+
+			logo, err := decodeHIIImage(
+				payload,
+				match.location,
+			)
+			if err != nil {
+				t.Fatalf(
+					"decodeHIIImage() returned an error: %v",
+					err,
+				)
+			}
+
+			bounds := logo.Bounds()
+
+			if bounds.Dx() <= 0 ||
+				bounds.Dy() <= 0 {
+				t.Fatalf(
+					"logo dimensions = %dx%d, want positive dimensions",
+					bounds.Dx(),
+					bounds.Dy(),
+				)
+			}
+		})
 	}
 }
 
-func TestFindBootLogoRejectsMissingLogoDxe(t *testing.T) {
-	image := testBitmap(2, 2)
-	section := testRawSection(t, image)
+func TestExtractBootLogoFixtures(t *testing.T) {
+	for _, fixture := range firmwareFixtures {
+		t.Run(fixture.name, func(t *testing.T) {
+			output := filepath.Join(
+				t.TempDir(),
+				"logo.bmp",
+			)
 
-	file := testLogoFile(section)
-	file.Header.GUID[0] ^= 0xff
+			err := extractBootLogo(
+				fixturePath(fixture.file),
+				output,
+			)
+			if err != nil {
+				t.Fatalf(
+					"extractBootLogo() returned an error: %v",
+					err,
+				)
+			}
 
-	_, err := findBootLogo(file)
-	if err == nil {
-		t.Fatal("findBootLogo() accepted firmware without LogoDxe")
-	}
+			data, err := os.ReadFile(output)
+			if err != nil {
+				t.Fatalf(
+					"ReadFile() returned an error: %v",
+					err,
+				)
+			}
 
-	if !strings.Contains(err.Error(), "LogoDxe") {
-		t.Fatalf(
-			"findBootLogo() error = %q, want LogoDxe error",
-			err,
-		)
+			if len(data) < len(bitmapSignature) ||
+				!bytes.Equal(
+					data[:len(bitmapSignature)],
+					bitmapSignature,
+				) {
+				t.Fatal(
+					"extracted image does not have a BMP signature",
+				)
+			}
+
+			logo, err := decodeBitmap(data)
+			if err != nil {
+				t.Fatalf(
+					"decodeBitmap() returned an error: %v",
+					err,
+				)
+			}
+
+			bounds := logo.Bounds()
+
+			if bounds.Dx() <= 0 ||
+				bounds.Dy() <= 0 {
+				t.Fatalf(
+					"extracted dimensions = %dx%d, want positive dimensions",
+					bounds.Dx(),
+					bounds.Dy(),
+				)
+			}
+		})
 	}
 }
 
-func TestFindBootLogoRejectsMissingBitmap(t *testing.T) {
-	section := testRawSection(
+func TestExtractBootLogoFixturesMatchesHIIParser(
+	t *testing.T,
+) {
+	for _, fixture := range firmwareFixtures {
+		t.Run(fixture.name, func(t *testing.T) {
+			firmware, err := readFirmware(
+				fixturePath(fixture.file),
+			)
+			if err != nil {
+				t.Fatalf(
+					"readFirmware() returned an error: %v",
+					err,
+				)
+			}
+
+			match, err := findBootLogo(firmware)
+			if err != nil {
+				t.Fatalf(
+					"findBootLogo() returned an error: %v",
+					err,
+				)
+			}
+
+			payload, err := sectionPayload(
+				match.section,
+			)
+			if err != nil {
+				t.Fatalf(
+					"sectionPayload() returned an error: %v",
+					err,
+				)
+			}
+
+			expected, err := decodeHIIImage(
+				payload,
+				match.location,
+			)
+			if err != nil {
+				t.Fatalf(
+					"decodeHIIImage() returned an error: %v",
+					err,
+				)
+			}
+
+			output := filepath.Join(
+				t.TempDir(),
+				"logo.bmp",
+			)
+
+			if err := extractBootLogo(
+				fixturePath(fixture.file),
+				output,
+			); err != nil {
+				t.Fatalf(
+					"extractBootLogo() returned an error: %v",
+					err,
+				)
+			}
+
+			data, err := os.ReadFile(output)
+			if err != nil {
+				t.Fatalf(
+					"ReadFile() returned an error: %v",
+					err,
+				)
+			}
+
+			actual, err := decodeBitmap(data)
+			if err != nil {
+				t.Fatalf(
+					"decodeBitmap() returned an error: %v",
+					err,
+				)
+			}
+
+			assertFixtureImagesEqual(
+				t,
+				actual,
+				expected,
+			)
+		})
+	}
+}
+
+func TestReplaceBootLogoFixturesInPlace(
+	t *testing.T,
+) {
+	for _, fixture := range firmwareFixtures {
+		t.Run(fixture.name, func(t *testing.T) {
+			directory := t.TempDir()
+
+			firmwarePath := filepath.Join(
+				directory,
+				fixture.file,
+			)
+
+			original := copyFixture(
+				t,
+				fixture.file,
+				firmwarePath,
+				0o640,
+			)
+
+			replacement := fixtureReplacementImage(
+				7,
+				5,
+			)
+
+			imagePath := filepath.Join(
+				directory,
+				"replacement.bmp",
+			)
+
+			writeFixtureBitmap(
+				t,
+				imagePath,
+				replacement,
+			)
+
+			if err := replaceBootLogo(
+				imagePath,
+				firmwarePath,
+				firmwarePath,
+			); err != nil {
+				t.Fatalf(
+					"replaceBootLogo() returned an error: %v",
+					err,
+				)
+			}
+
+			updated, err := os.ReadFile(
+				firmwarePath,
+			)
+			if err != nil {
+				t.Fatalf(
+					"ReadFile() returned an error: %v",
+					err,
+				)
+			}
+
+			if bytes.Equal(updated, original) {
+				t.Fatal(
+					"replacement did not modify the firmware",
+				)
+			}
+
+			info, err := os.Stat(firmwarePath)
+			if err != nil {
+				t.Fatalf(
+					"Stat() returned an error: %v",
+					err,
+				)
+			}
+
+			if info.Mode().Perm() != 0o640 {
+				t.Fatalf(
+					"firmware mode = %#o, want %#o",
+					info.Mode().Perm(),
+					os.FileMode(0o640),
+				)
+			}
+
+			assertFixtureReplacement(
+				t,
+				firmwarePath,
+				replacement,
+			)
+		})
+	}
+}
+
+func TestReplaceBootLogoFixturesSeparateOutput(
+	t *testing.T,
+) {
+	for _, fixture := range firmwareFixtures {
+		t.Run(fixture.name, func(t *testing.T) {
+			directory := t.TempDir()
+
+			inputPath := filepath.Join(
+				directory,
+				"input-"+fixture.file,
+			)
+
+			original := copyFixture(
+				t,
+				fixture.file,
+				inputPath,
+				0o644,
+			)
+
+			outputPath := filepath.Join(
+				directory,
+				"output-"+fixture.file,
+			)
+
+			replacement := fixtureReplacementImage(
+				9,
+				6,
+			)
+
+			imagePath := filepath.Join(
+				directory,
+				"replacement.bmp",
+			)
+
+			writeFixtureBitmap(
+				t,
+				imagePath,
+				replacement,
+			)
+
+			if err := replaceBootLogo(
+				imagePath,
+				inputPath,
+				outputPath,
+			); err != nil {
+				t.Fatalf(
+					"replaceBootLogo() returned an error: %v",
+					err,
+				)
+			}
+
+			inputAfter, err := os.ReadFile(
+				inputPath,
+			)
+			if err != nil {
+				t.Fatalf(
+					"ReadFile() returned an error: %v",
+					err,
+				)
+			}
+
+			if !bytes.Equal(
+				inputAfter,
+				original,
+			) {
+				t.Fatal(
+					"replacement modified the input while using a separate output",
+				)
+			}
+
+			output, err := os.ReadFile(
+				outputPath,
+			)
+			if err != nil {
+				t.Fatalf(
+					"ReadFile() returned an error: %v",
+					err,
+				)
+			}
+
+			if bytes.Equal(output, original) {
+				t.Fatal(
+					"separate output is unchanged",
+				)
+			}
+
+			assertFixtureReplacement(
+				t,
+				outputPath,
+				replacement,
+			)
+		})
+	}
+}
+
+func TestParseStandaloneFFSFixture(
+	t *testing.T,
+) {
+	data := readFixture(
 		t,
-		[]byte("this section does not contain a bitmap"),
+		"test.ffs",
 	)
-
-	file := testLogoFile(section)
-
-	_, err := findBootLogo(file)
-	if err == nil {
-		t.Fatal("findBootLogo() accepted LogoDxe without a bitmap")
-	}
-
-	if !strings.Contains(err.Error(), "no bitmap") {
-		t.Fatalf(
-			"findBootLogo() error = %q, want missing bitmap error",
-			err,
-		)
-	}
-}
-
-func TestFindBootLogoRejectsMultipleBitmaps(t *testing.T) {
-	first := testRawSection(t, testBitmap(2, 2))
-	second := testRawSection(t, testBitmap(3, 3))
-
-	file := testLogoFile(first, second)
-
-	_, err := findBootLogo(file)
-	if err == nil {
-		t.Fatal("findBootLogo() accepted multiple bitmaps")
-	}
-
-	if !strings.Contains(err.Error(), "multiple bitmaps") {
-		t.Fatalf(
-			"findBootLogo() error = %q, want multiple bitmap error",
-			err,
-		)
-	}
-}
-
-func TestFindBootLogoIgnoresInvalidBitmapSignature(t *testing.T) {
-	invalid := []byte{
-		0x00,
-		'B',
-		'M',
-		0x01,
-		0x02,
-		0x03,
-	}
-
-	valid := testBitmap(2, 2)
-
-	payload := append([]byte{}, invalid...)
-	payload = append(payload, valid...)
-
-	section := testRawSection(t, payload)
-	file := testLogoFile(section)
-
-	match, err := findBootLogo(file)
-	if err != nil {
-		t.Fatalf("findBootLogo() returned an error: %v", err)
-	}
-
-	start := match.location.offset
-	end := start + match.location.length
-	actual := section.Buf()[start:end]
-
-	if !bytes.Equal(actual, valid) {
-		t.Fatal("findBootLogo() selected the invalid bitmap signature")
-	}
-}
-
-func TestParseStandaloneFFS(t *testing.T) {
-	image := testBitmap(4, 3)
-	data := testStandaloneFFS(t, image)
 
 	file, ok := parseStandaloneFFS(data)
 	if !ok {
-		t.Fatal("parseStandaloneFFS() rejected a valid FFS file")
+		t.Fatal(
+			"parseStandaloneFFS() rejected tests/test.ffs",
+		)
 	}
 
 	if file.Header.GUID != logoFileGUID {
@@ -172,48 +474,72 @@ func TestParseStandaloneFFS(t *testing.T) {
 		)
 	}
 
-	match, err := findBootLogo(file)
-	if err != nil {
-		t.Fatalf("findBootLogo() returned an error: %v", err)
-	}
-
-	start := match.location.offset
-	end := start + match.location.length
-	actual := match.section.Buf()[start:end]
-
-	if !bytes.Equal(actual, image) {
-		t.Fatal("parsed FFS contains the wrong bitmap")
+	if _, err := findBootLogo(file); err != nil {
+		t.Fatalf(
+			"findBootLogo() returned an error: %v",
+			err,
+		)
 	}
 }
 
-func TestParseStandaloneFFSRejectsTrailingData(t *testing.T) {
-	data := testStandaloneFFS(t, testBitmap(2, 2))
+func TestParseStandaloneFFSRejectsROM(
+	t *testing.T,
+) {
+	data := readFixture(
+		t,
+		"test.rom",
+	)
+
+	if _, ok := parseStandaloneFFS(data); ok {
+		t.Fatal(
+			"parseStandaloneFFS() accepted tests/test.rom",
+		)
+	}
+}
+
+func TestParseStandaloneFFSRejectsTrailingData(
+	t *testing.T,
+) {
+	data := append(
+		[]byte{},
+		readFixture(t, "test.ffs")...,
+	)
+
 	data = append(data, 0xff)
 
 	if _, ok := parseStandaloneFFS(data); ok {
-		t.Fatal("parseStandaloneFFS() accepted trailing data")
+		t.Fatal(
+			"parseStandaloneFFS() accepted trailing data",
+		)
 	}
 }
 
-func TestParseStandaloneFFSRejectsShortData(t *testing.T) {
-	data := make([]byte, uefi.FileHeaderMinLength-1)
+func TestParseStandaloneFFSRejectsShortData(
+	t *testing.T,
+) {
+	data := make(
+		[]byte,
+		uefi.FileHeaderMinLength-1,
+	)
 
 	if _, ok := parseStandaloneFFS(data); ok {
-		t.Fatal("parseStandaloneFFS() accepted incomplete data")
+		t.Fatal(
+			"parseStandaloneFFS() accepted incomplete data",
+		)
 	}
 }
 
-func TestReadFirmwareParsesStandaloneFFS(t *testing.T) {
-	data := testStandaloneFFS(t, testBitmap(3, 2))
-	path := filepath.Join(t.TempDir(), "LogoDxe.ffs")
-
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		t.Fatalf("WriteFile() returned an error: %v", err)
-	}
-
-	firmware, err := readFirmware(path)
+func TestReadFirmwareParsesStandaloneFFSFixture(
+	t *testing.T,
+) {
+	firmware, err := readFirmware(
+		fixturePath("test.ffs"),
+	)
 	if err != nil {
-		t.Fatalf("readFirmware() returned an error: %v", err)
+		t.Fatalf(
+			"readFirmware() returned an error: %v",
+			err,
+		)
 	}
 
 	file, ok := firmware.(*uefi.File)
@@ -231,25 +557,252 @@ func TestReadFirmwareParsesStandaloneFFS(t *testing.T) {
 			logoFileGUID.String(),
 		)
 	}
+}
 
-	if _, err := findBootLogo(file); err != nil {
-		t.Fatalf("findBootLogo() returned an error: %v", err)
+func TestReadFirmwareParsesROMFixture(
+	t *testing.T,
+) {
+	firmware, err := readFirmware(
+		fixturePath("test.rom"),
+	)
+	if err != nil {
+		t.Fatalf(
+			"readFirmware() returned an error: %v",
+			err,
+		)
+	}
+
+	if firmware == nil {
+		t.Fatal(
+			"readFirmware() returned nil",
+		)
+	}
+
+	if _, ok := firmware.(*uefi.File); ok {
+		t.Fatal(
+			"readFirmware() treated the complete ROM as a standalone FFS file",
+		)
+	}
+
+	if _, err := findBootLogo(firmware); err != nil {
+		t.Fatalf(
+			"findBootLogo() returned an error: %v",
+			err,
+		)
 	}
 }
 
-func TestReadFirmwareRejectsEmptyFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "empty.fd")
+func TestFindBootLogoRejectsMissingLogoDxe(
+	t *testing.T,
+) {
+	file := &uefi.File{}
+	file.Header.GUID = logoFileGUID
+	file.Header.GUID[0] ^= 0xff
 
-	if err := os.WriteFile(path, nil, 0o644); err != nil {
-		t.Fatalf("WriteFile() returned an error: %v", err)
+	_, err := findBootLogo(file)
+	if err == nil {
+		t.Fatal(
+			"findBootLogo() accepted firmware without LogoDxe",
+		)
+	}
+
+	if !strings.Contains(
+		err.Error(),
+		"LogoDxe",
+	) {
+		t.Fatalf(
+			"findBootLogo() error = %q, want LogoDxe error",
+			err,
+		)
+	}
+}
+
+func TestFindBootLogoRejectsLogoDxeWithoutHIIImage(
+	t *testing.T,
+) {
+	file := &uefi.File{}
+	file.Header.GUID = logoFileGUID
+
+	_, err := findBootLogo(file)
+	if err == nil {
+		t.Fatal(
+			"findBootLogo() accepted LogoDxe without an HII image",
+		)
+	}
+
+	if !strings.Contains(
+		err.Error(),
+		"no HII boot logo",
+	) {
+		t.Fatalf(
+			"findBootLogo() error = %q, want missing HII logo error",
+			err,
+		)
+	}
+}
+
+func TestSectionPayloadStandardHeader(
+	t *testing.T,
+) {
+	payload := []byte{
+		'P',
+		'E',
+		0x00,
+		0x00,
+	}
+
+	section := &uefi.Section{}
+	section.Header.Type = uefi.SectionTypePE32
+	section.Header.Size = [3]uint8{
+		byte(
+			uefi.SectionMinLength +
+				len(payload),
+		),
+		0x00,
+		0x00,
+	}
+
+	buffer := []byte{
+		section.Header.Size[0],
+		section.Header.Size[1],
+		section.Header.Size[2],
+		byte(uefi.SectionTypePE32),
+	}
+
+	buffer = append(
+		buffer,
+		payload...,
+	)
+
+	section.SetBuf(buffer)
+
+	actual, err := sectionPayload(section)
+	if err != nil {
+		t.Fatalf(
+			"sectionPayload() returned an error: %v",
+			err,
+		)
+	}
+
+	if !bytes.Equal(actual, payload) {
+		t.Fatalf(
+			"sectionPayload() = %v, want %v",
+			actual,
+			payload,
+		)
+	}
+}
+
+func TestSectionPayloadExtendedHeader(
+	t *testing.T,
+) {
+	payload := []byte{
+		'P',
+		'E',
+		0x00,
+		0x00,
+	}
+
+	section := &uefi.Section{}
+	section.Header.Type = uefi.SectionTypePE32
+	section.Header.Size = [3]uint8{
+		0xff,
+		0xff,
+		0xff,
+	}
+
+	buffer := []byte{
+		0xff,
+		0xff,
+		0xff,
+		byte(uefi.SectionTypePE32),
+		0x0c,
+		0x00,
+		0x00,
+		0x00,
+	}
+
+	buffer = append(
+		buffer,
+		payload...,
+	)
+
+	section.SetBuf(buffer)
+
+	actual, err := sectionPayload(section)
+	if err != nil {
+		t.Fatalf(
+			"sectionPayload() returned an error: %v",
+			err,
+		)
+	}
+
+	if !bytes.Equal(actual, payload) {
+		t.Fatalf(
+			"sectionPayload() = %v, want %v",
+			actual,
+			payload,
+		)
+	}
+}
+
+func TestSectionPayloadRejectsNilSection(
+	t *testing.T,
+) {
+	if _, err := sectionPayload(nil); err == nil {
+		t.Fatal(
+			"sectionPayload() accepted a nil section",
+		)
+	}
+}
+
+func TestSectionPayloadRejectsShortHeader(
+	t *testing.T,
+) {
+	section := &uefi.Section{}
+	section.SetBuf([]byte{
+		0x01,
+		0x02,
+		0x03,
+	})
+
+	if _, err := sectionPayload(section); err == nil {
+		t.Fatal(
+			"sectionPayload() accepted an incomplete header",
+		)
+	}
+}
+
+func TestReadFirmwareRejectsEmptyFile(
+	t *testing.T,
+) {
+	path := filepath.Join(
+		t.TempDir(),
+		"empty.fd",
+	)
+
+	if err := os.WriteFile(
+		path,
+		nil,
+		0o644,
+	); err != nil {
+		t.Fatalf(
+			"WriteFile() returned an error: %v",
+			err,
+		)
 	}
 
 	_, err := readFirmware(path)
 	if err == nil {
-		t.Fatal("readFirmware() accepted an empty file")
+		t.Fatal(
+			"readFirmware() accepted an empty file",
+		)
 	}
 
-	if !strings.Contains(err.Error(), "empty") {
+	if !strings.Contains(
+		err.Error(),
+		"empty",
+	) {
 		t.Fatalf(
 			"readFirmware() error = %q, want empty file error",
 			err,
@@ -257,7 +810,9 @@ func TestReadFirmwareRejectsEmptyFile(t *testing.T) {
 	}
 }
 
-func TestReadFirmwareRejectsMissingFile(t *testing.T) {
+func TestReadFirmwareRejectsMissingFile(
+	t *testing.T,
+) {
 	path := filepath.Join(
 		t.TempDir(),
 		"missing.fd",
@@ -265,10 +820,15 @@ func TestReadFirmwareRejectsMissingFile(t *testing.T) {
 
 	_, err := readFirmware(path)
 	if err == nil {
-		t.Fatal("readFirmware() accepted a missing file")
+		t.Fatal(
+			"readFirmware() accepted a missing file",
+		)
 	}
 
-	if !strings.Contains(err.Error(), "read firmware") {
+	if !strings.Contains(
+		err.Error(),
+		"read firmware",
+	) {
 		t.Fatalf(
 			"readFirmware() error = %q, want read error",
 			err,
@@ -277,15 +837,28 @@ func TestReadFirmwareRejectsMissingFile(t *testing.T) {
 }
 
 func TestFileMode(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "firmware.fd")
+	path := filepath.Join(
+		t.TempDir(),
+		"firmware.fd",
+	)
 
-	if err := os.WriteFile(path, []byte("firmware"), 0o640); err != nil {
-		t.Fatalf("WriteFile() returned an error: %v", err)
+	if err := os.WriteFile(
+		path,
+		[]byte("firmware"),
+		0o640,
+	); err != nil {
+		t.Fatalf(
+			"WriteFile() returned an error: %v",
+			err,
+		)
 	}
 
 	mode, err := fileMode(path)
 	if err != nil {
-		t.Fatalf("fileMode() returned an error: %v", err)
+		t.Fatalf(
+			"fileMode() returned an error: %v",
+			err,
+		)
 	}
 
 	if mode != 0o640 {
@@ -298,16 +871,32 @@ func TestFileMode(t *testing.T) {
 }
 
 func TestWriteFileAtomic(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "output.fd")
-	expected := []byte("assembled firmware")
+	path := filepath.Join(
+		t.TempDir(),
+		"output.fd",
+	)
 
-	if err := writeFileAtomic(path, expected, 0o640); err != nil {
-		t.Fatalf("writeFileAtomic() returned an error: %v", err)
+	expected := []byte(
+		"assembled firmware",
+	)
+
+	if err := writeFileAtomic(
+		path,
+		expected,
+		0o640,
+	); err != nil {
+		t.Fatalf(
+			"writeFileAtomic() returned an error: %v",
+			err,
+		)
 	}
 
 	actual, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("ReadFile() returned an error: %v", err)
+		t.Fatalf(
+			"ReadFile() returned an error: %v",
+			err,
+		)
 	}
 
 	if !bytes.Equal(actual, expected) {
@@ -320,7 +909,10 @@ func TestWriteFileAtomic(t *testing.T) {
 
 	info, err := os.Stat(path)
 	if err != nil {
-		t.Fatalf("Stat() returned an error: %v", err)
+		t.Fatalf(
+			"Stat() returned an error: %v",
+			err,
+		)
 	}
 
 	if info.Mode().Perm() != 0o640 {
@@ -332,26 +924,46 @@ func TestWriteFileAtomic(t *testing.T) {
 	}
 }
 
-func TestWriteFileAtomicReplacesExistingFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "output.fd")
+func TestWriteFileAtomicReplacesExistingFile(
+	t *testing.T,
+) {
+	path := filepath.Join(
+		t.TempDir(),
+		"output.fd",
+	)
 
 	if err := os.WriteFile(
 		path,
 		[]byte("old firmware"),
 		0o600,
 	); err != nil {
-		t.Fatalf("WriteFile() returned an error: %v", err)
+		t.Fatalf(
+			"WriteFile() returned an error: %v",
+			err,
+		)
 	}
 
-	expected := []byte("new firmware")
+	expected := []byte(
+		"new firmware",
+	)
 
-	if err := writeFileAtomic(path, expected, 0o644); err != nil {
-		t.Fatalf("writeFileAtomic() returned an error: %v", err)
+	if err := writeFileAtomic(
+		path,
+		expected,
+		0o644,
+	); err != nil {
+		t.Fatalf(
+			"writeFileAtomic() returned an error: %v",
+			err,
+		)
 	}
 
 	actual, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("ReadFile() returned an error: %v", err)
+		t.Fatalf(
+			"ReadFile() returned an error: %v",
+			err,
+		)
 	}
 
 	if !bytes.Equal(actual, expected) {
@@ -363,7 +975,9 @@ func TestWriteFileAtomicReplacesExistingFile(t *testing.T) {
 	}
 }
 
-func TestWriteFileAtomicRejectsMissingDirectory(t *testing.T) {
+func TestWriteFileAtomicRejectsMissingDirectory(
+	t *testing.T,
+) {
 	path := filepath.Join(
 		t.TempDir(),
 		"missing",
@@ -383,70 +997,248 @@ func TestWriteFileAtomicRejectsMissingDirectory(t *testing.T) {
 	}
 }
 
-func testLogoFile(
-	sections ...*uefi.Section,
-) *uefi.File {
-	file := &uefi.File{
-		Sections: sections,
-	}
-
-	file.Header.GUID = logoFileGUID
-
-	return file
-}
-
-func testRawSection(
-	t *testing.T,
-	payload []byte,
-) *uefi.Section {
-	t.Helper()
-
-	section, err := uefi.CreateSection(
-		uefi.SectionTypeRaw,
-		payload,
-		nil,
-		nil,
+func fixturePath(name string) string {
+	return filepath.Join(
+		"..",
+		"tests",
+		name,
 	)
-	if err != nil {
-		t.Fatalf("CreateSection() returned an error: %v", err)
-	}
-
-	if err := section.GenSecHeader(); err != nil {
-		t.Fatalf("GenSecHeader() returned an error: %v", err)
-	}
-
-	return section
 }
 
-func testStandaloneFFS(
+func readFixture(
 	t *testing.T,
-	image []byte,
+	name string,
 ) []byte {
 	t.Helper()
 
-	section := testRawSection(t, image)
-	file := testLogoFile(section)
+	path := fixturePath(name)
 
-	file.Header.Type = uefi.FVFileTypeDriver
-	file.Type = file.Header.Type.String()
-
-	fileSize := uint64(
-		uefi.FileHeaderMinLength + len(section.Buf()),
-	)
-
-	file.SetSize(fileSize, true)
-
-	if err := file.ChecksumAndAssemble(
-		section.Buf(),
-	); err != nil {
+	data, err := os.ReadFile(path)
+	if err != nil {
 		t.Fatalf(
-			"ChecksumAndAssemble() returned an error: %v",
+			"read fixture %q: %v",
+			path,
 			err,
 		)
 	}
 
-	data := make([]byte, len(file.Buf()))
-	copy(data, file.Buf())
+	if len(data) == 0 {
+		t.Fatalf(
+			"fixture %q is empty",
+			path,
+		)
+	}
 
 	return data
+}
+
+func copyFixture(
+	t *testing.T,
+	name string,
+	destination string,
+	mode os.FileMode,
+) []byte {
+	t.Helper()
+
+	data := readFixture(t, name)
+
+	if err := os.WriteFile(
+		destination,
+		data,
+		mode,
+	); err != nil {
+		t.Fatalf(
+			"write fixture copy %q: %v",
+			destination,
+			err,
+		)
+	}
+
+	return data
+}
+
+func fixtureReplacementImage(
+	width int,
+	height int,
+) *image.NRGBA {
+	output := image.NewNRGBA(
+		image.Rect(
+			0,
+			0,
+			width,
+			height,
+		),
+	)
+
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			output.SetNRGBA(
+				x,
+				y,
+				color.NRGBA{
+					R: uint8(
+						20 + x*17,
+					),
+					G: uint8(
+						30 + y*23,
+					),
+					B: uint8(
+						40 +
+							(x+y)*11,
+					),
+					A: 0xff,
+				},
+			)
+		}
+	}
+
+	return output
+}
+
+func writeFixtureBitmap(
+	t *testing.T,
+	path string,
+	source image.Image,
+) {
+	t.Helper()
+
+	data, err := encodeBitmap(source)
+	if err != nil {
+		t.Fatalf(
+			"encodeBitmap() returned an error: %v",
+			err,
+		)
+	}
+
+	if err := os.WriteFile(
+		path,
+		data,
+		0o644,
+	); err != nil {
+		t.Fatalf(
+			"WriteFile() returned an error: %v",
+			err,
+		)
+	}
+}
+
+func assertFixtureReplacement(
+	t *testing.T,
+	firmwarePath string,
+	expected image.Image,
+) {
+	t.Helper()
+
+	firmware, err := readFirmware(
+		firmwarePath,
+	)
+	if err != nil {
+		t.Fatalf(
+			"updated firmware cannot be parsed: %v",
+			err,
+		)
+	}
+
+	match, err := findBootLogo(firmware)
+	if err != nil {
+		t.Fatalf(
+			"updated firmware does not contain a logo: %v",
+			err,
+		)
+	}
+
+	payload, err := sectionPayload(
+		match.section,
+	)
+	if err != nil {
+		t.Fatalf(
+			"sectionPayload() returned an error: %v",
+			err,
+		)
+	}
+
+	actual, err := decodeHIIImage(
+		payload,
+		match.location,
+	)
+	if err != nil {
+		t.Fatalf(
+			"decodeHIIImage() returned an error: %v",
+			err,
+		)
+	}
+
+	assertFixtureImagesEqual(
+		t,
+		actual,
+		expected,
+	)
+}
+
+func assertFixtureImagesEqual(
+	t *testing.T,
+	actual image.Image,
+	expected image.Image,
+) {
+	t.Helper()
+
+	if actual == nil {
+		t.Fatal(
+			"actual image is nil",
+		)
+	}
+
+	if expected == nil {
+		t.Fatal(
+			"expected image is nil",
+		)
+	}
+
+	actualBounds := actual.Bounds()
+	expectedBounds := expected.Bounds()
+
+	if actualBounds.Dx() != expectedBounds.Dx() ||
+		actualBounds.Dy() != expectedBounds.Dy() {
+		t.Fatalf(
+			"image dimensions = %dx%d, want %dx%d",
+			actualBounds.Dx(),
+			actualBounds.Dy(),
+			expectedBounds.Dx(),
+			expectedBounds.Dy(),
+		)
+	}
+
+	for y := 0; y < expectedBounds.Dy(); y++ {
+		for x := 0; x < expectedBounds.Dx(); x++ {
+			actualColor := color.NRGBAModel.Convert(
+				actual.At(
+					actualBounds.Min.X+x,
+					actualBounds.Min.Y+y,
+				),
+			).(color.NRGBA)
+
+			expectedColor := color.NRGBAModel.Convert(
+				expected.At(
+					expectedBounds.Min.X+x,
+					expectedBounds.Min.Y+y,
+				),
+			).(color.NRGBA)
+
+			if actualColor.R != expectedColor.R ||
+				actualColor.G != expectedColor.G ||
+				actualColor.B != expectedColor.B {
+				t.Fatalf(
+					"pixel (%d,%d) = (%d,%d,%d), want (%d,%d,%d)",
+					x,
+					y,
+					actualColor.R,
+					actualColor.G,
+					actualColor.B,
+					expectedColor.R,
+					expectedColor.G,
+					expectedColor.B,
+				)
+			}
+		}
+	}
 }
