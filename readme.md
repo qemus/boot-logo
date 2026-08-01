@@ -29,12 +29,6 @@ A small command-line utility for extracting and replacing the boot logo embedded
 boot-logo logo.png firmware.fd
 ```
 
-The `replace` command may also be specified explicitly:
-
-```bash
-boot-logo replace logo.png firmware.fd
-```
-
 The input image may be a BMP, PNG, JPG or JPEG file.
 
 By default, the supplied firmware file is modified in place.
