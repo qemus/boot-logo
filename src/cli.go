@@ -117,9 +117,7 @@ func parseOptions(args []string) (options, bool, error) {
 			index = len(args)
 
 		case argument == "-h" || argument == "--help":
-			if err := printUsage(stdout); err != nil {
-				return options, false, err
-			}
+			printUsage(stdout)
 
 			return options, true, nil
 
@@ -197,9 +195,7 @@ func parseOptions(args []string) (options, bool, error) {
 	switch options.command {
 	case commandReplace:
 		if len(positional) != 2 {
-			if err := printUsage(stderr); err != nil {
-				return options, false, err
-			}
+			printUsage(stderr)
 
 			return options, false, fmt.Errorf(
 				"replace requires an image and firmware path",
@@ -215,9 +211,7 @@ func parseOptions(args []string) (options, bool, error) {
 
 	case commandExtract:
 		if len(positional) != 1 {
-			if err := printUsage(stderr); err != nil {
-				return options, false, err
-			}
+			printUsage(stderr)
 
 			return options, false, fmt.Errorf(
 				"extract requires a firmware path",
@@ -242,9 +236,7 @@ func parseOptions(args []string) (options, bool, error) {
 
 	case commandInfo:
 		if len(positional) != 1 {
-			if err := printUsage(stderr); err != nil {
-				return options, false, err
-			}
+			printUsage(stderr)
 
 			return options, false, fmt.Errorf(
 				"info requires a firmware path",
@@ -255,9 +247,7 @@ func parseOptions(args []string) (options, bool, error) {
 
 	case commandVerify:
 		if len(positional) != 1 {
-			if err := printUsage(stderr); err != nil {
-				return options, false, err
-			}
+			printUsage(stderr)
 
 			return options, false, fmt.Errorf(
 				"verify requires a firmware path",
@@ -324,8 +314,8 @@ func printSuccess(
 	}
 }
 
-func printUsage(writer io.Writer) error {
-	_, err := fmt.Fprint(
+func printUsage(writer io.Writer) {
+	if _, err := fmt.Fprint(
 		writer,
 		`Usage:
   boot-logo [options] [replace] <image> <firmware>
@@ -347,7 +337,7 @@ Options:
   -v, --version        Show version information
 
 `,
-	)
-
-	return err
+	); err != nil {
+		return
+	}
 }
