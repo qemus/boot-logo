@@ -10,14 +10,14 @@
 
 </div></h1>
 
-A small command-line tool for extracting and replacing the boot logo embedded in OVMF firmware.
+A small command-line tool for extracting and replacing the boot logo embedded in OVMF firmware and FFS files.
 
 ## Features ✨
 
 - Replaces embedded logos with a custom image
 - Supports BMP, PNG, JPG and JPEG images
 - Preserves all unchanged firmware sections
-- Extracts bitmaps from TianoCore firmware files
+- Extracts bitmaps from firmware and FFS files
 - Available for both AMD64 and ARM64 platforms
 
 ## Usage
@@ -36,23 +36,12 @@ boot-logo replace logo.png firmware.fd
 
 The input image may be a BMP, PNG, JPG or JPEG file.
 
-By default, the modified firmware is written beside the original:
+By default, the supplied firmware file is modified in place.
 
-```text
-firmware.fd
-firmware.boot-logo.fd
-```
-
-Specify a different output path:
+To write the modified firmware to a different file instead:
 
 ```bash
 boot-logo replace logo.jpg firmware.fd --output modified.fd
-```
-
-Overwrite the input firmware:
-
-```bash
-boot-logo replace logo.bmp firmware.fd --in-place
 ```
 
 ### Extract the boot logo
@@ -73,18 +62,23 @@ Specify a different output path:
 boot-logo extract firmware.fd --output logo.bmp
 ```
 
+A logo can also be extracted from a standalone FFS file:
+
+```bash
+boot-logo extract LogoDxe.ffs
+```
+
 ### Options
 
 ```text
--o, --output <path>  Set the output path
-    --in-place       Overwrite the input firmware
+-o, --output <path>  Write to a different output path
 -h, --help           Show usage information
 -v, --version        Show version information
 ```
 
 ## Firmware support
 
-The firmware must contain the standard TianoCore `LogoDxe` file:
+The tool supports complete OVMF firmware images and standalone FFS files containing the standard TianoCore `LogoDxe` file:
 
 ```text
 F74D20EE-37E7-48FC-97F7-9B1047749C69
