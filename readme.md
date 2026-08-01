@@ -14,7 +14,7 @@ A small command-line tool for extracting and replacing the boot logo embedded in
 
 ## Features ✨
 
-- Replaces embedded bitmaps with a custom image
+- Replaces embedded logos with a custom image
 - Preserves all unchanged firmware sections
 - Extracts bitmaps from TianoCore firmware files
 - Available for both AMD64 and ARM64 platforms
