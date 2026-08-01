@@ -126,8 +126,6 @@ github.com/kr/pty v1.1.8/go.mod h1:O1sed60cT9XZ5uDucP5qwvh+TE3NnUj51EiZO/lmSfw=
 github.com/kr/text v0.1.0/go.mod h1:4Jbv+DJW3UT/LiOwJeYQe1efqtUx/iVham/4vfdArNI=
 github.com/kr/text v0.2.0 h1:5Nx0Ya0ZqY2ygV366QzturHI13Jq95ApcVaJBhpS+AY=
 github.com/kr/text v0.2.0/go.mod h1:eLer722TekiGuMkidMxC/pM04lWEeraHUUmBw8l2grE=
-github.com/linuxboot/fiano v1.2.0 h1:aagl73lFtp5xVDr4tztt3Z/lNvGZLVnjLLsJhgxV3m4=
-github.com/linuxboot/fiano v1.2.0/go.mod h1:HvBTukwQd5XqWHuwi/sdjK7ECnTvtbtPWC5Aj6K4iSQ=
 github.com/magiconair/properties v1.8.0/go.mod h1:PppfXfuXeibc/6YijjN8zIbojt8czPbwD3XqdrwzmxQ=
 github.com/mattn/go-colorable v0.1.4/go.mod h1:U0ppj6V5qS13XJ6of8GYAs25YV2eR4EVcfRqFIhoBtE=
 github.com/mattn/go-colorable v0.1.7/go.mod h1:u6P/XSegPjTcexA+o6vUJrdnUu04hMope9wVRipJSqc=
@@ -178,6 +176,8 @@ github.com/prometheus/procfs v0.0.0-20181005140218-185b4288413d/go.mod h1:c3At6R
 github.com/prometheus/procfs v0.0.0-20190507164030-5867b95ac084/go.mod h1:TjEm7ze935MbeOT/UhFTIMYKhuLP4wbCsTZCD3I8kEA=
 github.com/prometheus/procfs v0.0.2/go.mod h1:TjEm7ze935MbeOT/UhFTIMYKhuLP4wbCsTZCD3I8kEA=
 github.com/prometheus/tsdb v0.7.1/go.mod h1:qhTCs0VvXwvX/y3TZrWD7rabWM+ijKTux40TwIPHuXU=
+github.com/qemus/fiano v0.0.0-20260801193248-482fe58a488a h1:kKjvQUJ7onNHGZMlcVmGQfyyvjFKy0O3//u/JEDb0wY=
+github.com/qemus/fiano v0.0.0-20260801193248-482fe58a488a/go.mod h1:HvBTukwQd5XqWHuwi/sdjK7ECnTvtbtPWC5Aj6K4iSQ=
 github.com/rck/unit v0.0.3/go.mod h1:jTOnzP4s1OjIP1vdxb4n76b23QPKS4EurYg7sYMr2DM=
 github.com/rekby/gpt v0.0.0-20200219180433-a930afbc6edc/go.mod h1:scrOqOnnHVKCHENvFw8k9ajCb88uqLQDA4BvuJNJ2ew=
 github.com/rivo/uniseg v0.2.0/go.mod h1:J6wj4VEh+S6ZtnVlnTBMWIodfgj8LQOQFoIToxlJtxc=
