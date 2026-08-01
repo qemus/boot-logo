@@ -19,6 +19,7 @@ RUN wget -q \
       "module github.com/linuxboot/fiano" \
       /src/fiano/go.mod
 
+COPY tests/ /src/tests/
 COPY src/ /src/boot-logo/
 
 WORKDIR /src/boot-logo
