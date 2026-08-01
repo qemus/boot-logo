@@ -10,7 +10,7 @@
 
 </div></h1>
 
-A small command-line utility for extracting and replacing the boot logo embedded in OVMF firmware files.
+A small command-line utility for inspecting, verifying, extracting and replacing the boot logo embedded in OVMF firmware files.
 
 ## Features ✨
 
@@ -18,6 +18,8 @@ A small command-line utility for extracting and replacing the boot logo embedded
 - Supports BMP, PNG, JPG and JPEG images
 - Preserves all unchanged firmware sections
 - Extracts bitmaps from firmware and FFS files
+- Displays firmware and embedded logo information
+- Verifies firmware compatibility without modifying it
 - Available for both AMD64 and ARM64 platforms
 
 ## Usage
@@ -26,6 +28,12 @@ A small command-line utility for extracting and replacing the boot logo embedded
 
 ```bash
 boot-logo logo.png firmware.fd
+```
+
+The `replace` command may also be specified explicitly:
+
+```bash
+boot-logo replace logo.png firmware.fd
 ```
 
 The input image may be a BMP, PNG, JPG or JPEG file.
@@ -62,13 +70,91 @@ A logo can also be extracted from a standalone FFS file:
 boot-logo extract LogoDxe.ffs
 ```
 
+### Show firmware information
+
+```bash
+boot-logo info firmware.fd
+```
+
+The `info` command displays:
+
+- Firmware path, type and size
+- `LogoDxe` GUID
+- Embedded image format
+- Image dimensions and color depth
+- Embedded image size
+- Whether logo replacement is supported
+
+Example output:
+
+```text
+Firmware: firmware.fd
+Firmware type: UEFI firmware
+Firmware size: 4194304 bytes
+LogoDxe GUID: F74D20EE-37E7-48FC-97F7-9B1047749C69
+Image format: HII 24-bit bitmap
+Image dimensions: 640x480
+Image depth: 24 bits
+Embedded image size: 921604 bytes
+Replacement supported: true
+```
+
+Information can also be emitted as structured JSON:
+
+```bash
+boot-logo info firmware.fd --json
+```
+
+The command also supports standalone FFS files:
+
+```bash
+boot-logo info LogoDxe.ffs
+```
+
+### Verify firmware compatibility
+
+```bash
+boot-logo verify firmware.fd
+```
+
+The `verify` command checks that the file:
+
+- Is a supported UEFI firmware image or standalone FFS file
+- Contains exactly one supported `LogoDxe` file
+- Contains a valid embedded boot logo
+- Can be decoded and converted for safe replacement
+
+No files are modified.
+
+A successful verification prints:
+
+```text
+Firmware verified successfully: firmware.fd
+```
+
+Use quiet mode when only the exit status is needed:
+
+```bash
+boot-logo verify firmware.fd --quiet
+```
+
+The command exits with a non-zero status and prints an error when verification fails, making it suitable for scripts and CI workflows.
+
 ### Options
 
 ```text
 -o, --output <path>  Write to a different output path
+    --json           Print info as JSON
+-q, --quiet          Suppress successful verify output
 -h, --help           Show usage information
 -v, --version        Show version information
 ```
+
+`--output` is supported by the `replace` and `extract` commands.
+
+`--json` is supported only by the `info` command.
+
+`--quiet` is supported only by the `verify` command.
 
 ## Firmware support
 
