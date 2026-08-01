@@ -512,9 +512,9 @@ func TestReplaceEmbeddedBitmap(t *testing.T) {
 	}
 
 	location := updatedLocations[0]
-	actual := section.Buf()[
-		location.offset : location.offset+location.length
-	]
+	start := location.offset
+	end := start + location.length
+	actual := section.Buf()[start:end]
 
 	if !bytes.Equal(actual, replacement) {
 		t.Fatal("replacement bitmap does not match the input bitmap")
