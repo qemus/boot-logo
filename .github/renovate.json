@@ -10,5 +10,20 @@
       "matchDatasources": ["golang-version"],
       "enabled": false
     }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/(^|/)go\\.mod$/"
+      ],
+      "matchStrings": [
+        "replace github\\.com/linuxboot/fiano => github\\.com/qemus/fiano (?<currentValue>v\\S+)"
+      ],
+      "datasourceTemplate": "git-refs",
+      "depNameTemplate": "github.com/qemus/fiano",
+      "packageNameTemplate": "https://github.com/qemus/fiano.git",
+      "currentValueTemplate": "{{{currentValue}}}"
+    }
   ]
 }
