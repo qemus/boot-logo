@@ -113,10 +113,6 @@ Optionally install it system-wide:
 sudo install -m 755 boot-logo-amd64.bin /usr/local/bin/boot-logo
 ```
 
-## Warning
-
-Firmware modification always carries risk. Keep an untouched copy of the original firmware and verify the generated file before using it.
-
 ## Stars 🌟
 
 [![Stargazers](https://raw.githubusercontent.com/star-stats/stars/refs/heads/data/charts/qemus-boot-logo.svg)](https://github.com/qemus/boot-logo/stargazers)
