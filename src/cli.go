@@ -224,4 +224,5 @@ func printUsage(writer io.Writer) {
 		writer,
 		"  -v, --version        Show version information",
 	)
+	fmt.Fprintln(writer)
 }
