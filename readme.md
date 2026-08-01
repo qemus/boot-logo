@@ -15,6 +15,7 @@ A small command-line tool for extracting and replacing the boot logo embedded in
 ## Features ✨
 
 - Replaces embedded logos with a custom image
+- Supports BMP, PNG, JPG and JPEG images
 - Preserves all unchanged firmware sections
 - Extracts bitmaps from TianoCore firmware files
 - Available for both AMD64 and ARM64 platforms
@@ -24,26 +25,28 @@ A small command-line tool for extracting and replacing the boot logo embedded in
 ### Replace the boot logo
 
 ```bash
-boot-logo logo.bmp firmware.fd
+boot-logo logo.png firmware.fd
 ```
 
-The `replace` command may also be specified explicitly:
+The `replace` command can also be specified explicitly:
 
 ```bash
-boot-logo replace logo.bmp firmware.fd
+boot-logo replace logo.png firmware.fd
 ```
 
-By default, the modified firmware is written beside the original file:
+The input image may be a BMP, PNG, JPG or JPEG file. The format is detected from the file contents rather than its extension.
+
+By default, the modified firmware is written beside the original:
 
 ```text
 firmware.fd
 firmware.boot-logo.fd
 ```
 
-Set a custom output path:
+Specify a different output path:
 
 ```bash
-boot-logo replace logo.bmp firmware.fd --output modified.fd
+boot-logo replace logo.jpg firmware.fd --output modified.fd
 ```
 
 Overwrite the input firmware:
@@ -52,48 +55,44 @@ Overwrite the input firmware:
 boot-logo replace logo.bmp firmware.fd --in-place
 ```
 
-### Extract the current boot logo
+All replacement images, including BMP input, are converted to a bottom-up, uncompressed 24-bit BMP before being inserted into the firmware.
+
+### Extract the boot logo
 
 ```bash
 boot-logo extract firmware.fd
 ```
 
-By default, the extracted bitmap is written to:
+By default, the extracted logo is written to:
 
 ```text
 firmware.fd.logo.bmp
 ```
 
-Set a custom output path:
+Specify a different output path:
 
 ```bash
 boot-logo extract firmware.fd --output logo.bmp
 ```
 
-### Other options
+### Options
 
 ```text
--h, --help       Show usage information
--v, --version    Show version information
+-o, --output <path>  Set the output path
+    --in-place       Overwrite the input firmware
+-h, --help           Show usage information
+-v, --version        Show version information
 ```
 
-## Image requirements
+## Firmware support
 
-The replacement image must be an uncompressed BMP file.
-
-Supported color depths:
-
-```text
-1, 4, 8, 16, 24 and 32 bits per pixel
-```
-
-The firmware must contain exactly one valid bitmap inside the TianoCore `LogoDxe` file:
+The firmware must contain the standard TianoCore `LogoDxe` file:
 
 ```text
 F74D20EE-37E7-48FC-97F7-9B1047749C69
 ```
 
-The bitmap must be stored in a raw firmware section.
+The tool expects exactly one valid bitmap inside this file. Firmware that does not match this layout is rejected instead of being modified blindly.
 
 ## Installation
 
@@ -118,9 +117,7 @@ sudo install -m 755 boot-logo-amd64.bin /usr/local/bin/boot-logo
 
 ## Warning
 
-Firmware modification always carries risk. Keep an untouched copy of the original firmware and verify the generated image before using it.
-
-This tool currently targets firmware containing the standard TianoCore `LogoDxe` layout. Vendor-specific firmware may store its logo differently and will be rejected instead of being modified blindly.
+Firmware modification always carries risk. Keep an untouched copy of the original firmware and verify the generated file before using it.
 
 ## Stars 🌟
 
