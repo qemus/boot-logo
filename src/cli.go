@@ -117,12 +117,16 @@ func parseOptions(args []string) (options, bool, error) {
 			index = len(args)
 
 		case argument == "-h" || argument == "--help":
-			printUsage(stdout)
+			if err := printUsage(stdout); err != nil {
+				return options, false, err
+			}
 
 			return options, true, nil
 
 		case argument == "-v" || argument == "--version":
-			fmt.Fprintln(stdout, Version)
+			if _, err := fmt.Fprintln(stdout, Version); err != nil {
+				return options, false, err
+			}
 
 			return options, true, nil
 
@@ -193,7 +197,9 @@ func parseOptions(args []string) (options, bool, error) {
 	switch options.command {
 	case commandReplace:
 		if len(positional) != 2 {
-			printUsage(stderr)
+			if err := printUsage(stderr); err != nil {
+				return options, false, err
+			}
 
 			return options, false, fmt.Errorf(
 				"replace requires an image and firmware path",
@@ -209,7 +215,9 @@ func parseOptions(args []string) (options, bool, error) {
 
 	case commandExtract:
 		if len(positional) != 1 {
-			printUsage(stderr)
+			if err := printUsage(stderr); err != nil {
+				return options, false, err
+			}
 
 			return options, false, fmt.Errorf(
 				"extract requires a firmware path",
@@ -234,7 +242,9 @@ func parseOptions(args []string) (options, bool, error) {
 
 	case commandInfo:
 		if len(positional) != 1 {
-			printUsage(stderr)
+			if err := printUsage(stderr); err != nil {
+				return options, false, err
+			}
 
 			return options, false, fmt.Errorf(
 				"info requires a firmware path",
@@ -245,7 +255,9 @@ func parseOptions(args []string) (options, bool, error) {
 
 	case commandVerify:
 		if len(positional) != 1 {
-			printUsage(stderr)
+			if err := printUsage(stderr); err != nil {
+				return options, false, err
+			}
 
 			return options, false, fmt.Errorf(
 				"verify requires a firmware path",
@@ -312,63 +324,30 @@ func printSuccess(
 	}
 }
 
-func printUsage(writer io.Writer) {
-	fmt.Fprintln(writer, "Usage:")
-	fmt.Fprintln(
+func printUsage(writer io.Writer) error {
+	_, err := fmt.Fprint(
 		writer,
-		"  boot-logo [options] [replace] <image> <firmware>",
+		`Usage:
+  boot-logo [options] [replace] <image> <firmware>
+  boot-logo [options] extract <firmware>
+  boot-logo [options] info <firmware>
+  boot-logo [options] verify <firmware>
+
+Commands:
+  replace    Replace the firmware boot logo in-place (default)
+  extract    Extract the current firmware boot logo
+  info       Show firmware and embedded boot logo information
+  verify     Verify that the firmware and boot logo are supported
+
+Options:
+  -o, --output <path>  Write to a different output path
+      --json           Print info as JSON
+  -q, --quiet          Suppress successful verify output
+  -h, --help           Show usage information
+  -v, --version        Show version information
+
+`,
 	)
-	fmt.Fprintln(
-		writer,
-		"  boot-logo [options] extract <firmware>",
-	)
-	fmt.Fprintln(
-		writer,
-		"  boot-logo [options] info <firmware>",
-	)
-	fmt.Fprintln(
-		writer,
-		"  boot-logo [options] verify <firmware>",
-	)
-	fmt.Fprintln(writer)
-	fmt.Fprintln(writer, "Commands:")
-	fmt.Fprintln(
-		writer,
-		"  replace    Replace the firmware boot logo in-place (default)",
-	)
-	fmt.Fprintln(
-		writer,
-		"  extract    Extract the current firmware boot logo",
-	)
-	fmt.Fprintln(
-		writer,
-		"  info       Show firmware and embedded boot logo information",
-	)
-	fmt.Fprintln(
-		writer,
-		"  verify     Verify that the firmware and boot logo are supported",
-	)
-	fmt.Fprintln(writer)
-	fmt.Fprintln(writer, "Options:")
-	fmt.Fprintln(
-		writer,
-		"  -o, --output <path>  Write to a different output path",
-	)
-	fmt.Fprintln(
-		writer,
-		"      --json           Print info as JSON",
-	)
-	fmt.Fprintln(
-		writer,
-		"  -q, --quiet          Suppress successful verify output",
-	)
-	fmt.Fprintln(
-		writer,
-		"  -h, --help           Show usage information",
-	)
-	fmt.Fprintln(
-		writer,
-		"  -v, --version        Show version information",
-	)
-	fmt.Fprintln(writer)
+
+	return err
 }
