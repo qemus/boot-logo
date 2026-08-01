@@ -34,7 +34,7 @@ The `replace` command can also be specified explicitly:
 boot-logo replace logo.png firmware.fd
 ```
 
-The input image may be a BMP, PNG, JPG or JPEG file. The format is detected from the file contents rather than its extension.
+The input image may be a BMP, PNG, JPG or JPEG file.
 
 By default, the modified firmware is written beside the original:
 
@@ -54,8 +54,6 @@ Overwrite the input firmware:
 ```bash
 boot-logo replace logo.bmp firmware.fd --in-place
 ```
-
-All replacement images, including BMP input, are converted to a bottom-up, uncompressed 24-bit BMP before being inserted into the firmware.
 
 ### Extract the boot logo
 
