@@ -146,10 +146,9 @@ func TestFindBootLogoIgnoresInvalidBitmapSignature(t *testing.T) {
 		t.Fatalf("findBootLogo() returned an error: %v", err)
 	}
 
-	actual := section.Buf()[
-		match.location.offset :
-			match.location.offset+match.location.length
-	]
+	start := match.location.offset
+	end := start + match.location.length
+	actual := section.Buf()[start:end]
 
 	if !bytes.Equal(actual, valid) {
 		t.Fatal("findBootLogo() selected the invalid bitmap signature")
