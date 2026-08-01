@@ -75,9 +75,7 @@ func run(args []string) error {
 		return err
 	}
 
-	printSuccess(stdout, options)
-
-	return nil
+	return printSuccess(stdout, options)
 }
 
 func parseOptions(args []string) (options, bool, error) {
@@ -273,30 +271,44 @@ func samePath(first string, second string) bool {
 		filepath.Clean(secondPath)
 }
 
-func printSuccess(writer io.Writer, options options) {
+func printSuccess(
+	writer io.Writer,
+	options options,
+) error {
 	switch options.command {
 	case commandReplace:
-		fmt.Fprintf(
+		_, err := fmt.Fprintf(
 			writer,
 			"Boot logo replaced successfully: %s\n",
 			options.outputPath,
 		)
 
+		return err
+
 	case commandExtract:
-		fmt.Fprintf(
+		_, err := fmt.Fprintf(
 			writer,
 			"Boot logo extracted successfully: %s\n",
 			options.outputPath,
 		)
 
+		return err
+
 	case commandVerify:
-		if !options.quiet {
-			fmt.Fprintf(
-				writer,
-				"Firmware verified successfully: %s\n",
-				options.firmwarePath,
-			)
+		if options.quiet {
+			return nil
 		}
+
+		_, err := fmt.Fprintf(
+			writer,
+			"Firmware verified successfully: %s\n",
+			options.firmwarePath,
+		)
+
+		return err
+
+	default:
+		return nil
 	}
 }
 
