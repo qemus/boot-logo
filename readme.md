@@ -6,6 +6,7 @@
 
 [![Build]][build_url]
 [![Version]][release_url]
+[![Size]][release_url]
 
 </div></h1>
 
