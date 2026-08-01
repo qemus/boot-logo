@@ -7,7 +7,10 @@ import (
 
 	"github.com/linuxboot/fiano/pkg/guid"
 	"github.com/linuxboot/fiano/pkg/uefi"
-	"github.com/linuxboot/fiano/pkg/vi= *guid.MustParse(
+	"github.com/linuxboot/fiano/pkg/visitors"
+)
+
+var logoFileGUID = *guid.MustParse(
 	"F74D20EE-37E7-48FC-97F7-9B1047749C69",
 )
 
