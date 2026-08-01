@@ -516,6 +516,51 @@ func TestParseOptionsRejectsMissingExtractArgument(
 	}
 }
 
+
+func TestPrintSuccessReplace(t *testing.T) {
+	var output bytes.Buffer
+
+	printSuccess(
+		&output,
+		options{
+			command:    commandReplace,
+			outputPath: "modified.fd",
+		},
+	)
+
+	expected := "Boot logo replaced successfully: modified.fd\n"
+
+	if output.String() != expected {
+		t.Fatalf(
+			"success output = %q, want %q",
+			output.String(),
+			expected,
+		)
+	}
+}
+
+func TestPrintSuccessExtract(t *testing.T) {
+	var output bytes.Buffer
+
+	printSuccess(
+		&output,
+		options{
+			command:    commandExtract,
+			outputPath: "firmware.fd.logo.bmp",
+		},
+	)
+
+	expected := "Boot logo extracted successfully: firmware.fd.logo.bmp\n"
+
+	if output.String() != expected {
+		t.Fatalf(
+			"success output = %q, want %q",
+			output.String(),
+			expected,
+		)
+	}
+}
+
 func TestSamePath(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(
