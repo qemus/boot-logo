@@ -10,7 +10,7 @@
 
 </div></h1>
 
-A small command-line tool for extracting and replacing the boot logo embedded in OVMF firmware and FFS files.
+A small command-line tool for extracting and replacing the boot logo embedded in OVMF firmware files.
 
 ## Features ✨
 
