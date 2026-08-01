@@ -110,5 +110,5 @@ sudo install -m 755 boot-logo-amd64.bin /usr/local/bin/boot-logo
 [release_url]: https://github.com/qemus/boot-logo/releases
 
 [Build]: https://github.com/qemus/boot-logo/actions/workflows/build.yml/badge.svg
-[Size]: https://img.shields.io/badge/size-4.14_MB-steelblue?style=flat&color=066da5
+[Size]: https://img.shields.io/badge/size-3.48_MB-steelblue?style=flat&color=066da5
 [Version]: https://img.shields.io/github/v/tag/qemus/boot-logo?label=version&sort=semver&color=066da5
