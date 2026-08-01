@@ -25,7 +25,7 @@ WORKDIR /src/boot-logo
 
 RUN go mod edit \
       -replace=github.com/linuxboot/fiano=/src/fiano \
-    && go mod download \
+    && go mod tidy \
     && go test ./...
 
 ARG VERSION_ARG="0.0"
