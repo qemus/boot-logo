@@ -2026,10 +2026,7 @@ func replacePEResourceData(
 	)
 
 	copy(
-		output[
-			rawStart+resourceRelativeStart:
-				rawStart+resourceRelativeStart+len(newResource)
-		],
+		output[rawStart+resourceRelativeStart:rawStart+resourceRelativeStart+len(newResource)],
 		newResource,
 	)
 
@@ -2100,10 +2097,7 @@ func replacePEResourceData(
 
 	oldInitializedSize := int64(
 		binary.LittleEndian.Uint32(
-			output[
-				resource.sizeOfInitializedDataOffset:
-					resource.sizeOfInitializedDataOffset+4
-			],
+			output[resource.sizeOfInitializedDataOffset:resource.sizeOfInitializedDataOffset+4],
 		),
 	)
 
@@ -2120,10 +2114,7 @@ func replacePEResourceData(
 	}
 
 	binary.LittleEndian.PutUint32(
-		output[
-			resource.sizeOfInitializedDataOffset:
-				resource.sizeOfInitializedDataOffset+4
-		],
+		output[resource.sizeOfInitializedDataOffset:resource.sizeOfInitializedDataOffset+4],
 		uint32(newInitializedSize),
 	)
 
