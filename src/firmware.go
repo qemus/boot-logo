@@ -119,12 +119,33 @@ func readFirmware(path string) (uefi.Firmware, error) {
 		return nil, fmt.Errorf("firmware %q is empty", path)
 	}
 
+	if file, ok := parseStandaloneFFS(data); ok {
+		return file, nil
+	}
+
 	firmware, err := uefi.Parse(data)
 	if err != nil {
 		return nil, fmt.Errorf("parse firmware %q: %w", path, err)
 	}
 
 	return firmware, nil
+}
+
+func parseStandaloneFFS(data []byte) (*uefi.File, bool) {
+	if len(data) < uefi.FileHeaderMinLength {
+		return nil, false
+	}
+
+	file, err := uefi.NewFile(data)
+	if err != nil || file == nil {
+		return nil, false
+	}
+
+	if file.Header.ExtendedSize != uint64(len(data)) {
+		return nil, false
+	}
+
+	return file, true
 }
 
 func findBootLogo(firmware uefi.Firmware) (logoMatch, error) {
