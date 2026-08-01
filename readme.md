@@ -13,11 +13,10 @@ A small command-line tool for extracting and replacing the boot logo embedded in
 
 ## Features ✨
 
-- Extracts the bitmap from the TianoCore `LogoDxe` firmware file
-- Replaces the embedded bitmap with a custom BMP image
-- Preserves unchanged firmware sections
-- Supports output to a new file or replacement in place
-- Available for AMD64 and ARM64
+- Replaces embedded bitmaps with a custom image
+- Preserves all unchanged firmware sections
+- Extracts bitmaps from TianoCore firmware files
+- Available for both AMD64 and ARM64 platforms
 
 ## Usage
 
@@ -126,10 +125,10 @@ This tool currently targets firmware containing the standard TianoCore `LogoDxe`
 
 [![Stargazers](https://raw.githubusercontent.com/star-stats/stars/refs/heads/data/charts/qemus-boot-logo.svg)](https://github.com/qemus/boot-logo/stargazers)
 
-[build_url]: https://github.com/qemus/boot-logo/actions/workflows/build.yml
-[release_url]: https://github.com/qemus/boot-logo/releases
 [Fiano]: https://github.com/linuxboot/fiano
-[qemus/fiano]: https://github.com/qemus/fiano
+[build_url]: https://github.com/qemus/boot-logo/
+[release_url]: https://github.com/qemus/boot-logo/releases
 
 [Build]: https://github.com/qemus/boot-logo/actions/workflows/build.yml/badge.svg
+[Size]: https://img.shields.io/badge/size-4.14_MB-steelblue?style=flat&color=066da5
 [Version]: https://img.shields.io/github/v/tag/qemus/boot-logo?label=version&sort=semver&color=066da5
