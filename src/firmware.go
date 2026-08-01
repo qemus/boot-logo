@@ -3,8 +3,8 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
+	"github.com/google/renameio/v2"
 	"github.com/linuxboot/fiano/pkg/guid"
 	"github.com/linuxboot/fiano/pkg/uefi"
 	"github.com/linuxboot/fiano/pkg/visitors"
@@ -128,10 +128,11 @@ func replaceBootLogo(
 		return err
 	}
 
-	if err := writeFileAtomic(
+	if err := renameio.WriteFile(
 		outputPath,
 		output,
 		mode,
+		renameio.IgnoreUmask(),
 	); err != nil {
 		return fmt.Errorf(
 			"write firmware: %w",
@@ -180,10 +181,11 @@ func extractBootLogo(
 		)
 	}
 
-	if err := writeFileAtomic(
+	if err := renameio.WriteFile(
 		outputPath,
 		bitmap,
 		0o644,
+		renameio.IgnoreUmask(),
 	); err != nil {
 		return fmt.Errorf(
 			"write image: %w",
@@ -430,59 +432,4 @@ func fileMode(
 	}
 
 	return info.Mode().Perm(), nil
-}
-
-func writeFileAtomic(
-	path string,
-	data []byte,
-	mode os.FileMode,
-) error {
-	directory := filepath.Dir(path)
-	base := filepath.Base(path)
-
-	temp, err := os.CreateTemp(
-		directory,
-		"."+base+".tmp-*",
-	)
-	if err != nil {
-		return err
-	}
-
-	tempPath := temp.Name()
-	keep := false
-
-	defer func() {
-		_ = temp.Close()
-
-		if !keep {
-			_ = os.Remove(tempPath)
-		}
-	}()
-
-	if err := temp.Chmod(mode); err != nil {
-		return err
-	}
-
-	if _, err := temp.Write(data); err != nil {
-		return err
-	}
-
-	if err := temp.Sync(); err != nil {
-		return err
-	}
-
-	if err := temp.Close(); err != nil {
-		return err
-	}
-
-	if err := os.Rename(
-		tempPath,
-		path,
-	); err != nil {
-		return err
-	}
-
-	keep = true
-
-	return nil
 }
