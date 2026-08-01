@@ -12,41 +12,42 @@ import (
 )
 
 const (
-	peDOSSignature              = 0x5a4d
-	peSignature                 = 0x00004550
-	peOptionalHeader32Magic     = 0x010b
-	peOptionalHeader64Magic     = 0x020b
-	peFileHeaderSize            = 20
-	peSectionHeaderSize         = 40
-	peResourceDirectoryIndex    = 2
-	peResourceDirectorySize     = 16
-	peResourceDirectoryEntrySize = 8
-	peResourceDataEntrySize     = 16
+	peDOSSignature           = 0x5a4d
+	peSignature              = 0x00004550
+	peOptionalHeader32Magic  = 0x010b
+	peOptionalHeader64Magic  = 0x020b
+	peFileHeaderSize         = 20
+	peSectionHeaderSize      = 40
+	peResourceDirectoryIndex = 2
 
-	hiiPackageListHeaderSize = 20
-	hiiPackageHeaderSize     = 4
+	peResourceDirectoryHeaderSize = 16
+	peResourceDirectoryEntrySize  = 8
+	peResourceDataEntrySize       = 16
+
+	hiiPackageListHeaderSize  = 20
+	hiiPackageHeaderSize      = 4
 	hiiImagePackageHeaderSize = 12
 
 	hiiPackageImages = 0x06
 	hiiPackageEnd    = 0xdf
 
-	hiiImageEnd          = 0x00
-	hiiImage1Bit         = 0x10
-	hiiImage1BitTrans    = 0x11
-	hiiImage4Bit         = 0x12
-	hiiImage4BitTrans    = 0x13
-	hiiImage8Bit         = 0x14
-	hiiImage8BitTrans    = 0x15
-	hiiImage24Bit        = 0x16
-	hiiImage24BitTrans   = 0x17
-	hiiImageJPEG         = 0x18
-	hiiImagePNG          = 0x19
-	hiiImageDuplicate    = 0x20
-	hiiImageSkip2        = 0x21
-	hiiImageSkip1        = 0x22
-	hiiImageExt1         = 0x30
-	hiiImageExt2         = 0x31
-	hiiImageExt4         = 0x32
+	hiiImageEnd        = 0x00
+	hiiImage1Bit       = 0x10
+	hiiImage1BitTrans  = 0x11
+	hiiImage4Bit       = 0x12
+	hiiImage4BitTrans  = 0x13
+	hiiImage8Bit       = 0x14
+	hiiImage8BitTrans  = 0x15
+	hiiImage24Bit      = 0x16
+	hiiImage24BitTrans = 0x17
+	hiiImageJPEG       = 0x18
+	hiiImagePNG        = 0x19
+	hiiImageDuplicate  = 0x20
+	hiiImageSkip2      = 0x21
+	hiiImageSkip1      = 0x22
+	hiiImageExt1       = 0x30
+	hiiImageExt2       = 0x31
+	hiiImageExt4       = 0x32
 
 	maxUint16Value = 1<<16 - 1
 	maxUint24Value = 1<<24 - 1
@@ -91,12 +92,24 @@ type hiiImageLocation struct {
 	packageOffset int
 	packageLength int
 
+	imageInfoOffset   int
+	paletteInfoOffset int
+
 	blockOffset int
 	blockLength int
 	blockType   byte
+	palette     byte
 
 	width  int
 	height int
+}
+
+type hiiImageBlockInfo struct {
+	length       int
+	width        int
+	height       int
+	concrete     bool
+	paletteIndex byte
 }
 
 func findHIIImages(
@@ -111,17 +124,19 @@ func findHIIImages(
 		return nil, err
 	}
 
-	if resource.dataSize < hiiPackageListHeaderSize {
+	resourceStart := resource.dataOffset
+	resourceEnd := resourceStart + resource.dataSize
+
+	if resourceStart < 0 ||
+		resourceEnd > len(data) ||
+		resource.dataSize < hiiPackageListHeaderSize {
 		return nil, fmt.Errorf(
 			"HII package list header is incomplete",
 		)
 	}
 
-	listStart := resource.dataOffset
-	listLimit := listStart + resource.dataSize
-
 	listLength := int(binary.LittleEndian.Uint32(
-		data[listStart+16 : listStart+20],
+		data[resourceStart+16 : resourceStart+20],
 	))
 
 	if listLength < hiiPackageListHeaderSize {
@@ -131,9 +146,9 @@ func findHIIImages(
 		)
 	}
 
-	listEnd := listStart + listLength
+	listEnd := resourceStart + listLength
 
-	if listEnd > listLimit {
+	if listEnd > resourceEnd {
 		return nil, fmt.Errorf(
 			"HII package list length %d exceeds resource size %d",
 			listLength,
@@ -143,7 +158,7 @@ func findHIIImages(
 
 	var images []hiiImageLocation
 
-	for offset := listStart + hiiPackageListHeaderSize; offset < listEnd; {
+	for offset := resourceStart + hiiPackageListHeaderSize; offset < listEnd; {
 		if listEnd-offset < hiiPackageHeaderSize {
 			return nil, fmt.Errorf(
 				"HII package header is incomplete",
@@ -185,7 +200,10 @@ func findHIIImages(
 				return nil, err
 			}
 
-			images = append(images, packageImages...)
+			images = append(
+				images,
+				packageImages...,
+			)
 
 		case hiiPackageEnd:
 			return images, nil
@@ -212,8 +230,18 @@ func parseHIIImagePackage(
 
 	packageEnd := packageOffset + packageLength
 
+	if packageOffset < 0 || packageEnd > len(data) {
+		return nil, fmt.Errorf(
+			"HII image package is outside the PE image",
+		)
+	}
+
 	imageInfoOffset := int(binary.LittleEndian.Uint32(
 		data[packageOffset+4 : packageOffset+8],
+	))
+
+	paletteInfoOffset := int(binary.LittleEndian.Uint32(
+		data[packageOffset+8 : packageOffset+12],
 	))
 
 	if imageInfoOffset < hiiImagePackageHeaderSize ||
@@ -222,6 +250,16 @@ func parseHIIImagePackage(
 			"invalid HII image information offset: %d",
 			imageInfoOffset,
 		)
+	}
+
+	if paletteInfoOffset < 0 ||
+		paletteInfoOffset >= packageLength {
+		if paletteInfoOffset != 0 {
+			return nil, fmt.Errorf(
+				"invalid HII palette information offset: %d",
+				paletteInfoOffset,
+			)
+		}
 	}
 
 	var images []hiiImageLocation
@@ -233,17 +271,16 @@ func parseHIIImagePackage(
 			return images, nil
 		}
 
-		blockLength, width, height, concrete, err :=
-			parseHIIImageBlock(
-				data,
-				offset,
-				packageEnd,
-			)
+		info, err := parseHIIImageBlock(
+			data,
+			offset,
+			packageEnd,
+		)
 		if err != nil {
 			return nil, err
 		}
 
-		if concrete {
+		if info.concrete {
 			images = append(
 				images,
 				hiiImageLocation{
@@ -254,17 +291,21 @@ func parseHIIImagePackage(
 					packageOffset: packageOffset,
 					packageLength: packageLength,
 
-					blockOffset: offset,
-					blockLength: blockLength,
-					blockType:   blockType,
+					imageInfoOffset:   imageInfoOffset,
+					paletteInfoOffset: paletteInfoOffset,
 
-					width:  width,
-					height: height,
+					blockOffset: offset,
+					blockLength: info.length,
+					blockType:   blockType,
+					palette:     info.paletteIndex,
+
+					width:  info.width,
+					height: info.height,
 				},
 			)
 		}
 
-		offset += blockLength
+		offset += info.length
 	}
 
 	return nil, fmt.Errorf(
@@ -276,9 +317,11 @@ func parseHIIImageBlock(
 	data []byte,
 	offset int,
 	limit int,
-) (int, int, int, bool, error) {
-	if offset < 0 || offset >= limit || limit > len(data) {
-		return 0, 0, 0, false, fmt.Errorf(
+) (hiiImageBlockInfo, error) {
+	if offset < 0 ||
+		offset >= limit ||
+		limit > len(data) {
+		return hiiImageBlockInfo{}, fmt.Errorf(
 			"HII image block offset is outside the package",
 		)
 	}
@@ -287,107 +330,43 @@ func parseHIIImageBlock(
 
 	switch blockType {
 	case hiiImage1Bit, hiiImage1BitTrans:
-		width, height, err := readHIIImageDimensions(
+		return parseHIIPaletteImageBlock(
 			data,
 			offset,
 			limit,
-		)
-		if err != nil {
-			return 0, 0, 0, false, err
-		}
-
-		pixelLength, err := checkedImageDataLength(
-			width,
-			height,
 			1,
 		)
-		if err != nil {
-			return 0, 0, 0, false, err
-		}
-
-		blockLength := 5 + pixelLength
-
-		if err := checkBlockRange(
-			offset,
-			blockLength,
-			limit,
-		); err != nil {
-			return 0, 0, 0, false, err
-		}
-
-		return blockLength, width, height, true, nil
 
 	case hiiImage4Bit, hiiImage4BitTrans:
-		width, height, err := readHIIImageDimensions(
+		return parseHIIPaletteImageBlock(
 			data,
 			offset,
 			limit,
-		)
-		if err != nil {
-			return 0, 0, 0, false, err
-		}
-
-		pixelLength, err := checkedImageDataLength(
-			width,
-			height,
 			4,
 		)
-		if err != nil {
-			return 0, 0, 0, false, err
-		}
-
-		blockLength := 5 + pixelLength
-
-		if err := checkBlockRange(
-			offset,
-			blockLength,
-			limit,
-		); err != nil {
-			return 0, 0, 0, false, err
-		}
-
-		return blockLength, width, height, true, nil
 
 	case hiiImage8Bit, hiiImage8BitTrans:
-		width, height, err := readHIIImageDimensions(
+		return parseHIIPaletteImageBlock(
 			data,
 			offset,
 			limit,
-		)
-		if err != nil {
-			return 0, 0, 0, false, err
-		}
-
-		pixelLength, err := checkedImageDataLength(
-			width,
-			height,
 			8,
 		)
-		if err != nil {
-			return 0, 0, 0, false, err
-		}
-
-		blockLength := 5 + pixelLength
-
-		if err := checkBlockRange(
-			offset,
-			blockLength,
-			limit,
-		); err != nil {
-			return 0, 0, 0, false, err
-		}
-
-		return blockLength, width, height, true, nil
 
 	case hiiImage24Bit, hiiImage24BitTrans:
-		width, height, err := readHIIImageDimensions(
-			data,
-			offset,
-			limit,
-		)
-		if err != nil {
-			return 0, 0, 0, false, err
+		if limit-offset < 5 {
+			return hiiImageBlockInfo{}, fmt.Errorf(
+				"24-bit HII image block is incomplete",
+			)
 		}
+
+		width := int(binary.LittleEndian.Uint16(
+			data[offset+1 : offset+3],
+		))
+
+		height := int(binary.LittleEndian.Uint16(
+			data[offset+3 : offset+5],
+		))
 
 		pixelLength, err := checkedImageDataLength(
 			width,
@@ -395,7 +374,7 @@ func parseHIIImageBlock(
 			24,
 		)
 		if err != nil {
-			return 0, 0, 0, false, err
+			return hiiImageBlockInfo{}, err
 		}
 
 		blockLength := 5 + pixelLength
@@ -405,14 +384,19 @@ func parseHIIImageBlock(
 			blockLength,
 			limit,
 		); err != nil {
-			return 0, 0, 0, false, err
+			return hiiImageBlockInfo{}, err
 		}
 
-		return blockLength, width, height, true, nil
+		return hiiImageBlockInfo{
+			length:   blockLength,
+			width:    width,
+			height:   height,
+			concrete: true,
+		}, nil
 
 	case hiiImageJPEG, hiiImagePNG:
 		if limit-offset < 5 {
-			return 0, 0, 0, false, fmt.Errorf(
+			return hiiImageBlockInfo{}, fmt.Errorf(
 				"compressed HII image block is incomplete",
 			)
 		}
@@ -423,8 +407,8 @@ func parseHIIImageBlock(
 
 		blockLength64 := uint64(5) + payloadLength
 
-		if blockLength64 > uint64(^uint(0)>>1) {
-			return 0, 0, 0, false, fmt.Errorf(
+		if blockLength64 > uint64(maxIntValue()) {
+			return hiiImageBlockInfo{}, fmt.Errorf(
 				"compressed HII image is too large",
 			)
 		}
@@ -436,10 +420,13 @@ func parseHIIImageBlock(
 			blockLength,
 			limit,
 		); err != nil {
-			return 0, 0, 0, false, err
+			return hiiImageBlockInfo{}, err
 		}
 
-		return blockLength, 0, 0, true, nil
+		return hiiImageBlockInfo{
+			length:   blockLength,
+			concrete: true,
+		}, nil
 
 	case hiiImageDuplicate:
 		const blockLength = 3
@@ -449,10 +436,12 @@ func parseHIIImageBlock(
 			blockLength,
 			limit,
 		); err != nil {
-			return 0, 0, 0, false, err
+			return hiiImageBlockInfo{}, err
 		}
 
-		return blockLength, 0, 0, false, nil
+		return hiiImageBlockInfo{
+			length: blockLength,
+		}, nil
 
 	case hiiImageSkip1:
 		const blockLength = 2
@@ -462,10 +451,12 @@ func parseHIIImageBlock(
 			blockLength,
 			limit,
 		); err != nil {
-			return 0, 0, 0, false, err
+			return hiiImageBlockInfo{}, err
 		}
 
-		return blockLength, 0, 0, false, nil
+		return hiiImageBlockInfo{
+			length: blockLength,
+		}, nil
 
 	case hiiImageSkip2:
 		const blockLength = 3
@@ -475,14 +466,16 @@ func parseHIIImageBlock(
 			blockLength,
 			limit,
 		); err != nil {
-			return 0, 0, 0, false, err
+			return hiiImageBlockInfo{}, err
 		}
 
-		return blockLength, 0, 0, false, nil
+		return hiiImageBlockInfo{
+			length: blockLength,
+		}, nil
 
 	case hiiImageExt1:
 		if limit-offset < 3 {
-			return 0, 0, 0, false, fmt.Errorf(
+			return hiiImageBlockInfo{}, fmt.Errorf(
 				"HII EXT1 image block is incomplete",
 			)
 		}
@@ -490,7 +483,7 @@ func parseHIIImageBlock(
 		blockLength := int(data[offset+2])
 
 		if blockLength < 3 {
-			return 0, 0, 0, false, fmt.Errorf(
+			return hiiImageBlockInfo{}, fmt.Errorf(
 				"invalid HII EXT1 block length: %d",
 				blockLength,
 			)
@@ -501,14 +494,16 @@ func parseHIIImageBlock(
 			blockLength,
 			limit,
 		); err != nil {
-			return 0, 0, 0, false, err
+			return hiiImageBlockInfo{}, err
 		}
 
-		return blockLength, 0, 0, false, nil
+		return hiiImageBlockInfo{
+			length: blockLength,
+		}, nil
 
 	case hiiImageExt2:
 		if limit-offset < 4 {
-			return 0, 0, 0, false, fmt.Errorf(
+			return hiiImageBlockInfo{}, fmt.Errorf(
 				"HII EXT2 image block is incomplete",
 			)
 		}
@@ -518,7 +513,7 @@ func parseHIIImageBlock(
 		))
 
 		if blockLength < 4 {
-			return 0, 0, 0, false, fmt.Errorf(
+			return hiiImageBlockInfo{}, fmt.Errorf(
 				"invalid HII EXT2 block length: %d",
 				blockLength,
 			)
@@ -529,14 +524,16 @@ func parseHIIImageBlock(
 			blockLength,
 			limit,
 		); err != nil {
-			return 0, 0, 0, false, err
+			return hiiImageBlockInfo{}, err
 		}
 
-		return blockLength, 0, 0, false, nil
+		return hiiImageBlockInfo{
+			length: blockLength,
+		}, nil
 
 	case hiiImageExt4:
 		if limit-offset < 6 {
-			return 0, 0, 0, false, fmt.Errorf(
+			return hiiImageBlockInfo{}, fmt.Errorf(
 				"HII EXT4 image block is incomplete",
 			)
 		}
@@ -545,16 +542,11 @@ func parseHIIImageBlock(
 			data[offset+2 : offset+6],
 		))
 
-		if blockLength64 < 6 {
-			return 0, 0, 0, false, fmt.Errorf(
+		if blockLength64 < 6 ||
+			blockLength64 > uint64(maxIntValue()) {
+			return hiiImageBlockInfo{}, fmt.Errorf(
 				"invalid HII EXT4 block length: %d",
 				blockLength64,
-			)
-		}
-
-		if blockLength64 > uint64(^uint(0)>>1) {
-			return 0, 0, 0, false, fmt.Errorf(
-				"HII EXT4 image block is too large",
 			)
 		}
 
@@ -565,17 +557,69 @@ func parseHIIImageBlock(
 			blockLength,
 			limit,
 		); err != nil {
-			return 0, 0, 0, false, err
+			return hiiImageBlockInfo{}, err
 		}
 
-		return blockLength, 0, 0, false, nil
+		return hiiImageBlockInfo{
+			length: blockLength,
+		}, nil
 
 	default:
-		return 0, 0, 0, false, fmt.Errorf(
+		return hiiImageBlockInfo{}, fmt.Errorf(
 			"unsupported HII image block type: %#02x",
 			blockType,
 		)
 	}
+}
+
+func parseHIIPaletteImageBlock(
+	data []byte,
+	offset int,
+	limit int,
+	bitsPerPixel uint64,
+) (hiiImageBlockInfo, error) {
+	if limit-offset < 6 {
+		return hiiImageBlockInfo{}, fmt.Errorf(
+			"palette-based HII image block is incomplete",
+		)
+	}
+
+	paletteIndex := data[offset+1]
+
+	width := int(binary.LittleEndian.Uint16(
+		data[offset+2 : offset+4],
+	))
+
+	height := int(binary.LittleEndian.Uint16(
+		data[offset+4 : offset+6],
+	))
+
+	pixelLength, err := checkedImageDataLength(
+		width,
+		height,
+		bitsPerPixel,
+	)
+	if err != nil {
+		return hiiImageBlockInfo{}, err
+	}
+
+	blockLength := 6 + pixelLength
+
+	if err := checkBlockRange(
+		offset,
+		blockLength,
+		limit,
+	); err != nil {
+		return hiiImageBlockInfo{}, err
+	}
+
+	return hiiImageBlockInfo{
+		length:       blockLength,
+		width:        width,
+		height:       height,
+		concrete:     true,
+		paletteIndex: paletteIndex,
+	}, nil
 }
 
 func decodeHIIImage(
@@ -585,7 +629,9 @@ func decodeHIIImage(
 	start := location.blockOffset
 	end := start + location.blockLength
 
-	if start < 0 || end > len(data) || start >= end {
+	if start < 0 ||
+		end > len(data) ||
+		start >= end {
 		return nil, fmt.Errorf(
 			"HII image block is outside the PE image",
 		)
@@ -594,64 +640,47 @@ func decodeHIIImage(
 	block := data[start:end]
 
 	switch location.blockType {
+	case hiiImage1Bit, hiiImage1BitTrans:
+		return decodeHIIPaletteImage(
+			data,
+			location,
+			block,
+			1,
+		)
+
+	case hiiImage4Bit, hiiImage4BitTrans:
+		return decodeHIIPaletteImage(
+			data,
+			location,
+			block,
+			4,
+		)
+
+	case hiiImage8Bit, hiiImage8BitTrans:
+		return decodeHIIPaletteImage(
+			data,
+			location,
+			block,
+			8,
+		)
+
 	case hiiImage24Bit, hiiImage24BitTrans:
-		if len(block) < 5 {
-			return nil, fmt.Errorf(
-				"24-bit HII image block is incomplete",
-			)
-		}
-
-		width := int(binary.LittleEndian.Uint16(
-			block[1:3],
-		))
-		height := int(binary.LittleEndian.Uint16(
-			block[3:5],
-		))
-
-		pixelLength, err := checkedImageDataLength(
-			width,
-			height,
-			24,
-		)
-		if err != nil {
-			return nil, err
-		}
-
-		if len(block) != 5+pixelLength {
-			return nil, fmt.Errorf(
-				"24-bit HII image block has an invalid size",
-			)
-		}
-
-		output := image.NewNRGBA(
-			image.Rect(0, 0, width, height),
-		)
-
-		pixelOffset := 5
-
-		for y := 0; y < height; y++ {
-			for x := 0; x < width; x++ {
-				output.SetNRGBA(
-					x,
-					y,
-					color.NRGBA{
-						B: block[pixelOffset],
-						G: block[pixelOffset+1],
-						R: block[pixelOffset+2],
-						A: 0xff,
-					},
-				)
-
-				pixelOffset += 3
-			}
-		}
-
-		return output, nil
+		return decodeHII24BitImage(block)
 
 	case hiiImageJPEG:
 		if len(block) < 5 {
 			return nil, fmt.Errorf(
 				"JPEG HII image block is incomplete",
+			)
+		}
+
+		size := int(binary.LittleEndian.Uint32(
+			block[1:5],
+		))
+
+		if size != len(block)-5 {
+			return nil, fmt.Errorf(
+				"JPEG HII image block has an invalid size",
 			)
 		}
 
@@ -666,18 +695,18 @@ func decodeHIIImage(
 			)
 		}
 
+		size := int(binary.LittleEndian.Uint32(
+			block[1:5],
+		))
+
+		if size != len(block)-5 {
+			return nil, fmt.Errorf(
+				"PNG HII image block has an invalid size",
+			)
+		}
+
 		return png.Decode(
 			bytes.NewReader(block[5:]),
-		)
-
-	case hiiImage1Bit,
-		hiiImage1BitTrans,
-		hiiImage4Bit,
-		hiiImage4BitTrans,
-		hiiImage8Bit,
-		hiiImage8BitTrans:
-		return nil, fmt.Errorf(
-			"palette-based HII image blocks are not supported yet",
 		)
 
 	default:
@@ -686,6 +715,290 @@ func decodeHIIImage(
 			location.blockType,
 		)
 	}
+}
+
+func decodeHII24BitImage(
+	block []byte,
+) (image.Image, error) {
+	if len(block) < 5 {
+		return nil, fmt.Errorf(
+			"24-bit HII image block is incomplete",
+		)
+	}
+
+	width := int(binary.LittleEndian.Uint16(
+		block[1:3],
+	))
+
+	height := int(binary.LittleEndian.Uint16(
+		block[3:5],
+	))
+
+	pixelLength, err := checkedImageDataLength(
+		width,
+		height,
+		24,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(block) != 5+pixelLength {
+		return nil, fmt.Errorf(
+			"24-bit HII image block has an invalid size",
+		)
+	}
+
+	output := image.NewNRGBA(
+		image.Rect(0, 0, width, height),
+	)
+
+	offset := 5
+
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			output.SetNRGBA(
+				x,
+				y,
+				color.NRGBA{
+					B: block[offset],
+					G: block[offset+1],
+					R: block[offset+2],
+					A: 0xff,
+				},
+			)
+
+			offset += 3
+		}
+	}
+
+	return output, nil
+}
+
+func decodeHIIPaletteImage(
+	data []byte,
+	location hiiImageLocation,
+	block []byte,
+	bitsPerPixel uint64,
+) (image.Image, error) {
+	if len(block) < 6 {
+		return nil, fmt.Errorf(
+			"palette-based HII image block is incomplete",
+		)
+	}
+
+	width := int(binary.LittleEndian.Uint16(
+		block[2:4],
+	))
+
+	height := int(binary.LittleEndian.Uint16(
+		block[4:6],
+	))
+
+	pixelLength, err := checkedImageDataLength(
+		width,
+		height,
+		bitsPerPixel,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(block) != 6+pixelLength {
+		return nil, fmt.Errorf(
+			"palette-based HII image block has an invalid size",
+		)
+	}
+
+	palette, err := readHIIPalette(
+		data,
+		location,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	minimumColors := 1 << bitsPerPixel
+
+	if len(palette) < minimumColors {
+		return nil, fmt.Errorf(
+			"HII palette contains %d colors, need at least %d",
+			len(palette),
+			minimumColors,
+		)
+	}
+
+	output := image.NewNRGBA(
+		image.Rect(0, 0, width, height),
+	)
+
+	pixels := block[6:]
+	rowBytes := (width*int(bitsPerPixel) + 7) / 8
+
+	for y := 0; y < height; y++ {
+		row := pixels[
+			y*rowBytes :
+				(y+1)*rowBytes
+		]
+
+		for x := 0; x < width; x++ {
+			var paletteIndex int
+
+			switch bitsPerPixel {
+			case 1:
+				byteIndex := x / 8
+				bitIndex := 7 - x%8
+
+				paletteIndex = int(
+					(row[byteIndex] >> bitIndex) & 0x01,
+				)
+
+			case 4:
+				byteIndex := x / 2
+
+				if x%2 == 0 {
+					paletteIndex = int(
+						(row[byteIndex] >> 4) & 0x0f,
+					)
+				} else {
+					paletteIndex = int(
+						row[byteIndex] & 0x0f,
+					)
+				}
+
+			case 8:
+				paletteIndex = int(row[x])
+
+			default:
+				return nil, fmt.Errorf(
+					"unsupported HII palette depth: %d",
+					bitsPerPixel,
+				)
+			}
+
+			if paletteIndex >= len(palette) {
+				return nil, fmt.Errorf(
+					"HII palette index %d is out of range",
+					paletteIndex,
+				)
+			}
+
+			output.SetNRGBA(
+				x,
+				y,
+				palette[paletteIndex],
+			)
+		}
+	}
+
+	return output, nil
+}
+
+func readHIIPalette(
+	data []byte,
+	location hiiImageLocation,
+) ([]color.NRGBA, error) {
+	if location.palette == 0 {
+		return nil, fmt.Errorf(
+			"HII image refers to palette zero",
+		)
+	}
+
+	if location.paletteInfoOffset == 0 {
+		return nil, fmt.Errorf(
+			"HII image package does not contain palette information",
+		)
+	}
+
+	packageStart := location.packageOffset
+	packageEnd := packageStart + location.packageLength
+	paletteOffset := packageStart + location.paletteInfoOffset
+
+	if packageStart < 0 ||
+		packageEnd > len(data) ||
+		paletteOffset < packageStart ||
+		paletteOffset+2 > packageEnd {
+		return nil, fmt.Errorf(
+			"HII palette information is outside the image package",
+		)
+	}
+
+	paletteCount := int(binary.LittleEndian.Uint16(
+		data[paletteOffset : paletteOffset+2],
+	))
+
+	if paletteCount == 0 {
+		return nil, fmt.Errorf(
+			"HII image package contains no palettes",
+		)
+	}
+
+	if int(location.palette) > paletteCount {
+		return nil, fmt.Errorf(
+			"HII palette index %d exceeds palette count %d",
+			location.palette,
+			paletteCount,
+		)
+	}
+
+	offset := paletteOffset + 2
+
+	for index := 1; index <= paletteCount; index++ {
+		if offset+2 > packageEnd {
+			return nil, fmt.Errorf(
+				"HII palette header is incomplete",
+			)
+		}
+
+		paletteSize := int(binary.LittleEndian.Uint16(
+			data[offset : offset+2],
+		))
+
+		offset += 2
+
+		if paletteSize < 0 ||
+			offset+paletteSize > packageEnd {
+			return nil, fmt.Errorf(
+				"HII palette exceeds the image package",
+			)
+		}
+
+		if paletteSize%3 != 0 {
+			return nil, fmt.Errorf(
+				"HII palette size %d is not divisible by three",
+				paletteSize,
+			)
+		}
+
+		if index == int(location.palette) {
+			colorCount := paletteSize / 3
+
+			palette := make(
+				[]color.NRGBA,
+				colorCount,
+			)
+
+			for colorIndex := 0; colorIndex < colorCount; colorIndex++ {
+				colorOffset := offset + colorIndex*3
+
+				palette[colorIndex] = color.NRGBA{
+					B: data[colorOffset],
+					G: data[colorOffset+1],
+					R: data[colorOffset+2],
+					A: 0xff,
+				}
+			}
+
+			return palette, nil
+		}
+
+		offset += paletteSize
+	}
+
+	return nil, fmt.Errorf(
+		"HII palette %d was not found",
+		location.palette,
+	)
 }
 
 func replaceHIIImage(
@@ -735,6 +1048,7 @@ func replaceHIIImage(
 	delta := len(newBlock) - location.blockLength
 
 	newPackageLength := location.packageLength + delta
+
 	if newPackageLength < hiiImagePackageHeaderSize ||
 		newPackageLength > maxUint24Value {
 		return nil, fmt.Errorf(
@@ -744,6 +1058,7 @@ func replaceHIIImage(
 	}
 
 	newListLength := listLength + delta
+
 	if newListLength < hiiPackageListHeaderSize ||
 		uint64(newListLength) > maxUint32Value {
 		return nil, fmt.Errorf(
@@ -806,6 +1121,35 @@ func replaceHIIImage(
 		],
 		packageHeader,
 	)
+
+	if location.paletteInfoOffset != 0 {
+		oldPaletteOffset :=
+			location.packageOffset +
+				location.paletteInfoOffset
+
+		if oldPaletteOffset > blockStart {
+			newPaletteOffset :=
+				location.paletteInfoOffset + delta
+
+			if newPaletteOffset < hiiImagePackageHeaderSize ||
+				newPaletteOffset >= newPackageLength {
+				return nil, fmt.Errorf(
+					"updated HII palette offset is invalid",
+				)
+			}
+
+			paletteFieldOffset :=
+				packageRelativeOffset + 8
+
+			binary.LittleEndian.PutUint32(
+				newList[
+					paletteFieldOffset :
+						paletteFieldOffset+4
+				],
+				uint32(newPaletteOffset),
+			)
+		}
+	}
 
 	binary.LittleEndian.PutUint32(
 		newList[16:20],
@@ -929,7 +1273,8 @@ func findHIIResource(
 		))
 	}
 
-	if peOffset < 0 || len(data)-peOffset < 24 {
+	if peOffset < 0 ||
+		len(data)-peOffset < 24 {
 		return peResourceInfo{}, fmt.Errorf(
 			"PE header offset is outside the image",
 		)
@@ -946,17 +1291,24 @@ func findHIIResource(
 	fileHeaderOffset := peOffset + 4
 
 	numberOfSections := int(binary.LittleEndian.Uint16(
-		data[fileHeaderOffset+2 : fileHeaderOffset+4],
+		data[
+			fileHeaderOffset+2 :
+				fileHeaderOffset+4
+		],
 	))
 
 	optionalHeaderSize := int(binary.LittleEndian.Uint16(
-		data[fileHeaderOffset+16 : fileHeaderOffset+18],
+		data[
+			fileHeaderOffset+16 :
+				fileHeaderOffset+18
+		],
 	))
 
 	optionalOffset :=
 		fileHeaderOffset + peFileHeaderSize
 
-	optionalEnd := optionalOffset + optionalHeaderSize
+	optionalEnd :=
+		optionalOffset + optionalHeaderSize
 
 	if optionalHeaderSize <= 0 ||
 		optionalEnd > len(data) {
@@ -966,7 +1318,10 @@ func findHIIResource(
 	}
 
 	magic := binary.LittleEndian.Uint16(
-		data[optionalOffset : optionalOffset+2],
+		data[
+			optionalOffset :
+				optionalOffset+2
+		],
 	)
 
 	var (
@@ -976,12 +1331,18 @@ func findHIIResource(
 
 	switch magic {
 	case peOptionalHeader32Magic:
-		numberOfDirectoriesOffset = optionalOffset + 92
-		dataDirectoryOffset = optionalOffset + 96
+		numberOfDirectoriesOffset =
+			optionalOffset + 92
+
+		dataDirectoryOffset =
+			optionalOffset + 96
 
 	case peOptionalHeader64Magic:
-		numberOfDirectoriesOffset = optionalOffset + 108
-		dataDirectoryOffset = optionalOffset + 112
+		numberOfDirectoriesOffset =
+			optionalOffset + 108
+
+		dataDirectoryOffset =
+			optionalOffset + 112
 
 	default:
 		return peResourceInfo{}, fmt.Errorf(
@@ -1025,16 +1386,15 @@ func findHIIResource(
 		],
 	)
 
-	resourceDirectorySizeValue :=
-		binary.LittleEndian.Uint32(
-			data[
-				resourceDirectoryEntryOffset+4 :
-					resourceDirectoryEntryOffset+8
-			],
-		)
+	resourceDirectorySize := binary.LittleEndian.Uint32(
+		data[
+			resourceDirectoryEntryOffset+4 :
+				resourceDirectoryEntryOffset+8
+		],
+	)
 
 	if resourceRVA == 0 ||
-		resourceDirectorySizeValue == 0 {
+		resourceDirectorySize == 0 {
 		return peResourceInfo{},
 			errHIIResourceNotFound
 	}
@@ -1046,24 +1406,29 @@ func findHIIResource(
 	}
 
 	sectionAlignment := binary.LittleEndian.Uint32(
-		data[optionalOffset+32 : optionalOffset+36],
+		data[
+			optionalOffset+32 :
+				optionalOffset+36
+		],
 	)
 
 	fileAlignment := binary.LittleEndian.Uint32(
-		data[optionalOffset+36 : optionalOffset+40],
+		data[
+			optionalOffset+36 :
+				optionalOffset+40
+		],
 	)
 
-	if sectionAlignment == 0 || fileAlignment == 0 {
+	if sectionAlignment == 0 ||
+		fileAlignment == 0 {
 		return peResourceInfo{}, fmt.Errorf(
 			"PE alignment fields must not be zero",
 		)
 	}
 
-	sectionHeadersOffset := optionalEnd
-
 	sections, err := parsePESections(
 		data,
-		sectionHeadersOffset,
+		optionalEnd,
 		numberOfSections,
 	)
 	if err != nil {
@@ -1084,7 +1449,7 @@ func findHIIResource(
 
 	resourceLimit64 :=
 		uint64(resourceBase) +
-			uint64(resourceDirectorySizeValue)
+			uint64(resourceDirectorySize)
 
 	if resourceLimit64 > uint64(len(data)) {
 		return peResourceInfo{}, fmt.Errorf(
@@ -1116,11 +1481,17 @@ func findHIIResource(
 	}
 
 	dataRVA := binary.LittleEndian.Uint32(
-		data[hiiEntryOffset : hiiEntryOffset+4],
+		data[
+			hiiEntryOffset :
+				hiiEntryOffset+4
+		],
 	)
 
 	dataSize := int(binary.LittleEndian.Uint32(
-		data[hiiEntryOffset+4 : hiiEntryOffset+8],
+		data[
+			hiiEntryOffset+4 :
+				hiiEntryOffset+8
+		],
 	))
 
 	if dataSize <= 0 {
@@ -1142,7 +1513,8 @@ func findHIIResource(
 	}
 
 	dataEnd64 :=
-		uint64(dataOffset) + uint64(dataSize)
+		uint64(dataOffset) +
+			uint64(dataSize)
 
 	if dataEnd64 > uint64(len(data)) {
 		return peResourceInfo{}, fmt.Errorf(
@@ -1151,22 +1523,41 @@ func findHIIResource(
 	}
 
 	return peResourceInfo{
-		sizeOfInitializedDataOffset: optionalOffset + 8,
-		sizeOfImageOffset:           optionalOffset + 56,
-		checksumOffset:              optionalOffset + 64,
+		sizeOfInitializedDataOffset:
+			optionalOffset + 8,
+
+		sizeOfImageOffset:
+			optionalOffset + 56,
+
+		checksumOffset:
+			optionalOffset + 64,
+
 		directorySizeOffset:
 			resourceDirectoryEntryOffset + 4,
 
-		fileAlignment:    fileAlignment,
-		sectionAlignment: sectionAlignment,
-		directorySize:    resourceDirectorySizeValue,
+		fileAlignment:
+			fileAlignment,
 
-		section:  dataSection,
-		sections: sections,
+		sectionAlignment:
+			sectionAlignment,
 
-		dataEntryOffset: hiiEntryOffset,
-		dataOffset:      dataOffset,
-		dataSize:        dataSize,
+		directorySize:
+			resourceDirectorySize,
+
+		section:
+			dataSection,
+
+		sections:
+			sections,
+
+		dataEntryOffset:
+			hiiEntryOffset,
+
+		dataOffset:
+			dataOffset,
+
+		dataSize:
+			dataSize,
 	}, nil
 }
 
@@ -1185,7 +1576,8 @@ func parsePESections(
 		uint64(offset) +
 			uint64(count)*peSectionHeaderSize
 
-	if offset < 0 || required64 > uint64(len(data)) {
+	if offset < 0 ||
+		required64 > uint64(len(data)) {
 		return nil, fmt.Errorf(
 			"PE section headers are incomplete",
 		)
@@ -1202,35 +1594,40 @@ func parsePESections(
 			offset + index*peSectionHeaderSize
 
 		section := peSectionInfo{
-			headerOffset: headerOffset,
+			headerOffset:
+				headerOffset,
 
-			virtualSize: binary.LittleEndian.Uint32(
-				data[
-					headerOffset+8 :
-						headerOffset+12
-				],
-			),
+			virtualSize:
+				binary.LittleEndian.Uint32(
+					data[
+						headerOffset+8 :
+							headerOffset+12
+					],
+				),
 
-			virtualAddress: binary.LittleEndian.Uint32(
-				data[
-					headerOffset+12 :
-						headerOffset+16
-				],
-			),
+			virtualAddress:
+				binary.LittleEndian.Uint32(
+					data[
+						headerOffset+12 :
+							headerOffset+16
+					],
+				),
 
-			rawSize: binary.LittleEndian.Uint32(
-				data[
-					headerOffset+16 :
-						headerOffset+20
-				],
-			),
+			rawSize:
+				binary.LittleEndian.Uint32(
+					data[
+						headerOffset+16 :
+							headerOffset+20
+					],
+				),
 
-			rawOffset: binary.LittleEndian.Uint32(
-				data[
-					headerOffset+20 :
-						headerOffset+24
-				],
-			),
+			rawOffset:
+				binary.LittleEndian.Uint32(
+					data[
+						headerOffset+20 :
+							headerOffset+24
+					],
+				),
 		}
 
 		if section.rawSize != 0 {
@@ -1246,7 +1643,10 @@ func parsePESections(
 			}
 		}
 
-		sections = append(sections, section)
+		sections = append(
+			sections,
+			section,
+		)
 	}
 
 	return sections, nil
@@ -1259,11 +1659,13 @@ func mapPERVAToOffset(
 ) (int, peSectionInfo, error) {
 	for _, section := range sections {
 		span := section.virtualSize
+
 		if section.rawSize > span {
 			span = section.rawSize
 		}
 
-		if span == 0 || rva < section.virtualAddress {
+		if span == 0 ||
+			rva < section.virtualAddress {
 			continue
 		}
 
@@ -1283,7 +1685,8 @@ func mapPERVAToOffset(
 		}
 
 		offset64 :=
-			uint64(section.rawOffset) + relative
+			uint64(section.rawOffset) +
+				relative
 
 		if offset64 >= uint64(fileSize) {
 			return 0, peSectionInfo{}, fmt.Errorf(
@@ -1309,31 +1712,109 @@ func findHIIResourceEntry(
 	if resourceBase < 0 ||
 		resourceLimit > len(data) ||
 		resourceLimit-resourceBase <
-			peResourceDirectorySize {
+			peResourceDirectoryHeaderSize {
 		return 0, fmt.Errorf(
 			"PE resource directory header is incomplete",
 		)
 	}
 
+	entryOffset, err := findNamedPEResourceEntry(
+		data,
+		resourceBase,
+		resourceLimit,
+		resourceBase,
+		"HII",
+	)
+	if err != nil {
+		return 0, err
+	}
+
+	value := binary.LittleEndian.Uint32(
+		data[
+			entryOffset+4 :
+				entryOffset+8
+		],
+	)
+
+	for depth := 0; depth < 8; depth++ {
+		if value&0x80000000 == 0 {
+			dataEntryOffset :=
+				resourceBase +
+					int(value&0x7fffffff)
+
+			if dataEntryOffset < resourceBase ||
+				dataEntryOffset+
+					peResourceDataEntrySize >
+					resourceLimit {
+				return 0, fmt.Errorf(
+					"PE HII resource data entry is outside the resource directory",
+				)
+			}
+
+			return dataEntryOffset, nil
+		}
+
+		directoryOffset :=
+			int(value & 0x7fffffff)
+
+		nextEntry, err :=
+			firstPEResourceDirectoryEntry(
+				data,
+				resourceBase,
+				resourceLimit,
+				directoryOffset,
+			)
+		if err != nil {
+			return 0, err
+		}
+
+		value = binary.LittleEndian.Uint32(
+			data[
+				nextEntry+4 :
+					nextEntry+8
+			],
+		)
+	}
+
+	return 0, fmt.Errorf(
+		"PE HII resource tree is too deeply nested",
+	)
+}
+
+func findNamedPEResourceEntry(
+	data []byte,
+	resourceBase int,
+	resourceLimit int,
+	directory int,
+	expected string,
+) (int, error) {
+	if directory < resourceBase ||
+		directory+peResourceDirectoryHeaderSize >
+			resourceLimit {
+		return 0, fmt.Errorf(
+			"PE resource directory is outside the resource section",
+		)
+	}
+
 	namedEntries := int(binary.LittleEndian.Uint16(
 		data[
-			resourceBase+12 :
-				resourceBase+14
+			directory+12 :
+				directory+14
 		],
 	))
 
 	idEntries := int(binary.LittleEndian.Uint16(
 		data[
-			resourceBase+14 :
-				resourceBase+16
+			directory+14 :
+				directory+16
 		],
 	))
 
 	totalEntries := namedEntries + idEntries
 
 	entriesEnd64 :=
-		uint64(resourceBase) +
-			peResourceDirectorySize +
+		uint64(directory) +
+			peResourceDirectoryHeaderSize +
 			uint64(totalEntries)*
 				peResourceDirectoryEntrySize
 
@@ -1345,12 +1826,15 @@ func findHIIResourceEntry(
 
 	for index := 0; index < namedEntries; index++ {
 		entryOffset :=
-			resourceBase +
-				peResourceDirectorySize +
+			directory +
+				peResourceDirectoryHeaderSize +
 				index*peResourceDirectoryEntrySize
 
 		nameValue := binary.LittleEndian.Uint32(
-			data[entryOffset : entryOffset+4],
+			data[
+				entryOffset :
+					entryOffset+4
+			],
 		)
 
 		if nameValue&0x80000000 == 0 {
@@ -1370,57 +1854,9 @@ func findHIIResourceEntry(
 			return 0, err
 		}
 
-		if name != "HII" {
-			continue
+		if name == expected {
+			return entryOffset, nil
 		}
-
-		value := binary.LittleEndian.Uint32(
-			data[entryOffset+4 : entryOffset+8],
-		)
-
-		for level := 0;
-			level < 2 &&
-				value&0x80000000 != 0;
-			level++ {
-			directoryOffset :=
-				int(value & 0x7fffffff)
-
-			nextEntry, err :=
-				firstPEResourceDirectoryEntry(
-					data,
-					resourceBase,
-					resourceLimit,
-					directoryOffset,
-				)
-			if err != nil {
-				return 0, err
-			}
-
-			value = binary.LittleEndian.Uint32(
-				data[nextEntry+4 : nextEntry+8],
-			)
-		}
-
-		if value&0x80000000 != 0 {
-			return 0, fmt.Errorf(
-				"PE HII resource tree is too deeply nested",
-			)
-		}
-
-		dataEntryOffset :=
-			resourceBase +
-				int(value&0x7fffffff)
-
-		if dataEntryOffset < resourceBase ||
-			dataEntryOffset+
-				peResourceDataEntrySize >
-				resourceLimit {
-			return 0, fmt.Errorf(
-				"PE HII resource data entry is outside the resource directory",
-			)
-		}
-
-		return dataEntryOffset, nil
 	}
 
 	return 0, errHIIResourceNotFound
@@ -1436,7 +1872,7 @@ func firstPEResourceDirectoryEntry(
 		resourceBase + directoryOffset
 
 	if directory < resourceBase ||
-		directory+peResourceDirectorySize >
+		directory+peResourceDirectoryHeaderSize >
 			resourceLimit {
 		return 0, fmt.Errorf(
 			"PE resource subdirectory is outside the resource directory",
@@ -1444,11 +1880,17 @@ func firstPEResourceDirectoryEntry(
 	}
 
 	namedEntries := int(binary.LittleEndian.Uint16(
-		data[directory+12 : directory+14],
+		data[
+			directory+12 :
+				directory+14
+		],
 	))
 
 	idEntries := int(binary.LittleEndian.Uint16(
-		data[directory+14 : directory+16],
+		data[
+			directory+14 :
+				directory+16
+		],
 	))
 
 	if namedEntries+idEntries == 0 {
@@ -1458,7 +1900,8 @@ func firstPEResourceDirectoryEntry(
 	}
 
 	entry :=
-		directory + peResourceDirectorySize
+		directory +
+			peResourceDirectoryHeaderSize
 
 	if entry+peResourceDirectoryEntrySize >
 		resourceLimit {
@@ -1476,20 +1919,26 @@ func readPEResourceName(
 	resourceLimit int,
 	nameOffset int,
 ) (string, error) {
-	offset := resourceBase + nameOffset
+	offset :=
+		resourceBase + nameOffset
 
-	if offset < resourceBase || offset+2 > resourceLimit {
+	if offset < resourceBase ||
+		offset+2 > resourceLimit {
 		return "", fmt.Errorf(
 			"PE resource name is outside the resource directory",
 		)
 	}
 
 	length := int(binary.LittleEndian.Uint16(
-		data[offset : offset+2],
+		data[
+			offset :
+				offset+2
+		],
 	))
 
 	stringEnd64 :=
-		uint64(offset+2) + uint64(length)*2
+		uint64(offset+2) +
+			uint64(length)*2
 
 	if stringEnd64 > uint64(resourceLimit) {
 		return "", fmt.Errorf(
@@ -1497,17 +1946,27 @@ func readPEResourceName(
 		)
 	}
 
-	runes := make([]rune, 0, length)
+	runes := make(
+		[]rune,
+		0,
+		length,
+	)
 
 	for index := 0; index < length; index++ {
+		characterOffset :=
+			offset + 2 + index*2
+
 		value := binary.LittleEndian.Uint16(
 			data[
-				offset+2+index*2 :
-					offset+4+index*2
+				characterOffset :
+					characterOffset+2
 			],
 		)
 
-		runes = append(runes, rune(value))
+		runes = append(
+			runes,
+			rune(value),
+		)
 	}
 
 	return string(runes), nil
@@ -1548,7 +2007,8 @@ func replacePEResourceData(
 		resource.dataOffset - rawStart
 
 	resourceRelativeEnd :=
-		resourceRelativeStart + resource.dataSize
+		resourceRelativeStart +
+			resource.dataSize
 
 	if resourceRelativeStart < 0 ||
 		resourceRelativeEnd > oldRawSize {
@@ -1558,7 +2018,9 @@ func replacePEResourceData(
 	}
 
 	virtualLimit := int(section.virtualSize)
-	if virtualLimit <= 0 || virtualLimit > oldRawSize {
+
+	if virtualLimit <= 0 ||
+		virtualLimit > oldRawSize {
 		virtualLimit = oldRawSize
 	}
 
@@ -1574,27 +2036,15 @@ func replacePEResourceData(
 		)
 	}
 
-	for _, other := range resource.sections {
-		if other.rawSize == 0 {
-			continue
-		}
+	requiredVirtualSize :=
+		resourceRelativeStart +
+			len(newResource)
 
-		if other.rawOffset > section.rawOffset {
-			return nil, fmt.Errorf(
-				"PE resource section is not the final file section",
-			)
-		}
+	newVirtualSize := int(section.virtualSize)
+
+	if newVirtualSize < requiredVirtualSize {
+		newVirtualSize = requiredVirtualSize
 	}
-
-	if oldRawEnd < len(data) &&
-		containsNonZero(data[oldRawEnd:]) {
-		return nil, fmt.Errorf(
-			"PE image contains data after its final section",
-		)
-	}
-
-	newVirtualSize :=
-		resourceRelativeStart + len(newResource)
 
 	if uint64(newVirtualSize) > maxUint32Value {
 		return nil, fmt.Errorf(
@@ -1602,36 +2052,57 @@ func replacePEResourceData(
 		)
 	}
 
-	newRawSize64, err := alignValue(
-		uint64(newVirtualSize),
-		uint64(resource.fileAlignment),
-	)
-	if err != nil {
+	if err := checkPEVirtualGrowth(
+		resource.sections,
+		section,
+		uint32(newVirtualSize),
+	); err != nil {
 		return nil, err
 	}
 
-	if newRawSize64 > maxUint32Value ||
-		newRawSize64 > uint64(^uint(0)>>1) {
-		return nil, fmt.Errorf(
-			"updated PE resource section is too large",
+	newRawSize := oldRawSize
+
+	if requiredVirtualSize > oldRawSize {
+		alignedRawSize, err := alignValue(
+			uint64(requiredVirtualSize),
+			uint64(resource.fileAlignment),
 		)
+		if err != nil {
+			return nil, err
+		}
+
+		if alignedRawSize > maxUint32Value ||
+			alignedRawSize > uint64(maxIntValue()) {
+			return nil, fmt.Errorf(
+				"updated PE resource section is too large",
+			)
+		}
+
+		newRawSize = int(alignedRawSize)
 	}
 
-	newRawSize := int(newRawSize64)
+	rawDelta :=
+		newRawSize - oldRawSize
 
 	newLength64 :=
-		uint64(len(data)-oldRawSize) +
-			uint64(newRawSize)
+		uint64(len(data)) +
+			uint64(rawDelta)
 
-	if newLength64 > uint64(^uint(0)>>1) {
+	if newLength64 > uint64(maxIntValue()) {
 		return nil, fmt.Errorf(
 			"updated PE image exceeds the platform size limit",
 		)
 	}
 
-	output := make([]byte, int(newLength64))
+	output := make(
+		[]byte,
+		int(newLength64),
+	)
 
-	copy(output[:rawStart], data[:rawStart])
+	copy(
+		output[:rawStart],
+		data[:rawStart],
+	)
 
 	copy(
 		output[
@@ -1654,8 +2125,12 @@ func replacePEResourceData(
 	)
 
 	copy(
-		output[rawStart+newRawSize:],
-		data[oldRawEnd:],
+		output[
+			rawStart+newRawSize :
+		],
+		data[
+			oldRawEnd :
+		],
 	)
 
 	binary.LittleEndian.PutUint32(
@@ -1673,6 +2148,33 @@ func replacePEResourceData(
 		],
 		uint32(newRawSize),
 	)
+
+	if rawDelta != 0 {
+		for _, other := range resource.sections {
+			if other.rawSize == 0 ||
+				other.rawOffset <= section.rawOffset {
+				continue
+			}
+
+			newRawOffset64 :=
+				uint64(other.rawOffset) +
+					uint64(rawDelta)
+
+			if newRawOffset64 > maxUint32Value {
+				return nil, fmt.Errorf(
+					"updated PE section offset is too large",
+				)
+			}
+
+			binary.LittleEndian.PutUint32(
+				output[
+					other.headerOffset+20 :
+						other.headerOffset+24
+				],
+				uint32(newRawOffset64),
+			)
+		}
+	}
 
 	binary.LittleEndian.PutUint32(
 		output[
@@ -1706,20 +2208,18 @@ func replacePEResourceData(
 		uint32(newDirectorySize),
 	)
 
-	rawDelta :=
-		int64(newRawSize) -
-			int64(oldRawSize)
-
-	oldInitializedSize :=
-		int64(binary.LittleEndian.Uint32(
+	oldInitializedSize := int64(
+		binary.LittleEndian.Uint32(
 			output[
 				resource.sizeOfInitializedDataOffset :
 					resource.sizeOfInitializedDataOffset+4
 			],
-		))
+		),
+	)
 
 	newInitializedSize :=
-		oldInitializedSize + rawDelta
+		oldInitializedSize +
+			int64(rawDelta)
 
 	if newInitializedSize < 0 ||
 		uint64(newInitializedSize) >
@@ -1766,6 +2266,43 @@ func replacePEResourceData(
 	return output, nil
 }
 
+func checkPEVirtualGrowth(
+	sections []peSectionInfo,
+	updated peSectionInfo,
+	newVirtualSize uint32,
+) error {
+	var nextAddress uint32
+
+	for _, section := range sections {
+		if section.virtualAddress <=
+			updated.virtualAddress {
+			continue
+		}
+
+		if nextAddress == 0 ||
+			section.virtualAddress < nextAddress {
+			nextAddress =
+				section.virtualAddress
+		}
+	}
+
+	if nextAddress == 0 {
+		return nil
+	}
+
+	available :=
+		uint64(nextAddress) -
+			uint64(updated.virtualAddress)
+
+	if uint64(newVirtualSize) > available {
+		return fmt.Errorf(
+			"updated HII resource does not fit before the next PE section",
+		)
+	}
+
+	return nil
+}
+
 func calculatePESizeOfImage(
 	sections []peSectionInfo,
 	updatedHeaderOffset int,
@@ -1779,11 +2316,13 @@ func calculatePESizeOfImage(
 
 		if section.headerOffset ==
 			updatedHeaderOffset {
-			virtualSize = updatedVirtualSize
+			virtualSize =
+				updatedVirtualSize
 		}
 
 		if virtualSize == 0 {
-			virtualSize = section.rawSize
+			virtualSize =
+				section.rawSize
 		}
 
 		end :=
@@ -1803,43 +2342,14 @@ func calculatePESizeOfImage(
 		}
 	}
 
-	if maximum == 0 || maximum > maxUint32Value {
+	if maximum == 0 ||
+		maximum > maxUint32Value {
 		return 0, fmt.Errorf(
 			"updated PE image size is invalid",
 		)
 	}
 
 	return uint32(maximum), nil
-}
-
-func readHIIImageDimensions(
-	data []byte,
-	offset int,
-	limit int,
-) (int, int, error) {
-	if offset < 0 ||
-		limit-offset < 5 ||
-		limit > len(data) {
-		return 0, 0, fmt.Errorf(
-			"HII image dimensions are incomplete",
-		)
-	}
-
-	width := int(binary.LittleEndian.Uint16(
-		data[offset+1 : offset+3],
-	))
-
-	height := int(binary.LittleEndian.Uint16(
-		data[offset+3 : offset+5],
-	))
-
-	if width <= 0 || height <= 0 {
-		return 0, 0, fmt.Errorf(
-			"HII image dimensions must be greater than zero",
-		)
-	}
-
-	return width, height, nil
 }
 
 func checkedImageDataLength(
@@ -1854,15 +2364,17 @@ func checkedImageDataLength(
 	}
 
 	rowBits :=
-		uint64(width) * bitsPerPixel
+		uint64(width) *
+			bitsPerPixel
 
 	rowBytes :=
 		(rowBits + 7) / 8
 
 	size :=
-		rowBytes * uint64(height)
+		rowBytes *
+			uint64(height)
 
-	if size > uint64(^uint(0)>>1) {
+	if size > uint64(maxIntValue()) {
 		return 0, fmt.Errorf(
 			"image pixel data is too large",
 		)
@@ -1898,12 +2410,15 @@ func alignValue(
 		)
 	}
 
-	remainder := value % alignment
+	remainder :=
+		value % alignment
+
 	if remainder == 0 {
 		return value, nil
 	}
 
-	increment := alignment - remainder
+	increment :=
+		alignment - remainder
 
 	if value > ^uint64(0)-increment {
 		return 0, fmt.Errorf(
@@ -1914,7 +2429,9 @@ func alignValue(
 	return value + increment, nil
 }
 
-func containsNonZero(data []byte) bool {
+func containsNonZero(
+	data []byte,
+) bool {
 	for _, value := range data {
 		if value != 0 {
 			return true
@@ -1922,4 +2439,8 @@ func containsNonZero(data []byte) bool {
 	}
 
 	return false
+}
+
+func maxIntValue() int {
+	return int(^uint(0) >> 1)
 }
