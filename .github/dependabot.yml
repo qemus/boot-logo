@@ -19,3 +19,10 @@ updates:
         update-types:
           - version-update:semver-minor
           - version-update:semver-patch
+
+  - package-ecosystem: gomod
+    directory: /src
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
