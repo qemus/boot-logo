@@ -413,7 +413,44 @@ func TestParseOptionsRejectsUnknownCommand(
 	}
 }
 
-func TestParseOptionsAllowsDotlessImageWithDoubleDash(
+func TestParseOptionsAllowsExplicitDotlessPath(
+	t *testing.T,
+) {
+	result, handled, err := parseOptions([]string{
+		"./supply",
+		"logo1.ffs",
+	})
+	if err != nil {
+		t.Fatalf(
+			"parseOptions() returned an error: %v",
+			err,
+		)
+	}
+
+	if handled {
+		t.Fatal(
+			"parseOptions() unexpectedly handled the command",
+		)
+	}
+
+	if result.imagePath != "./supply" {
+		t.Errorf(
+			"imagePath = %q, want %q",
+			result.imagePath,
+			"./supply",
+		)
+	}
+
+	if result.firmwarePath != "logo1.ffs" {
+		t.Errorf(
+			"firmwarePath = %q, want %q",
+			result.firmwarePath,
+			"logo1.ffs",
+		)
+	}
+}
+
+func TestParseOptionsAllowsDotlessPathAfterDoubleDash(
 	t *testing.T,
 ) {
 	result, handled, err := parseOptions([]string{
@@ -628,13 +665,18 @@ func TestParseOptionsRejectsMissingExtractArgument(
 func TestPrintSuccessReplace(t *testing.T) {
 	var output bytes.Buffer
 
-	printSuccess(
+	if err := printSuccess(
 		&output,
 		options{
 			command:    commandReplace,
 			outputPath: "modified.fd",
 		},
-	)
+	); err != nil {
+		t.Fatalf(
+			"printSuccess() returned an error: %v",
+			err,
+		)
+	}
 
 	expected := "Boot logo replaced successfully: modified.fd\n"
 
@@ -650,13 +692,18 @@ func TestPrintSuccessReplace(t *testing.T) {
 func TestPrintSuccessExtract(t *testing.T) {
 	var output bytes.Buffer
 
-	printSuccess(
+	if err := printSuccess(
 		&output,
 		options{
 			command:    commandExtract,
 			outputPath: "firmware.fd.logo.bmp",
 		},
-	)
+	); err != nil {
+		t.Fatalf(
+			"printSuccess() returned an error: %v",
+			err,
+		)
+	}
 
 	expected := "Boot logo extracted successfully: firmware.fd.logo.bmp\n"
 
