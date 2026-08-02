@@ -2696,8 +2696,9 @@ func planPEVirtualGrowth(
 
 	relocation := plan.sections[nextIndex]
 
+	updatedRawEnd := uint64(updated.rawOffset) + uint64(updated.rawSize)
 	if relocation.rawSize == 0 ||
-		relocation.rawOffset <= updated.rawOffset {
+		uint64(relocation.rawOffset) < updatedRawEnd {
 		return peVirtualGrowthPlan{}, fmt.Errorf(
 			"final PE .reloc section cannot be moved safely",
 		)
