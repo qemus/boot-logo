@@ -101,7 +101,9 @@ func parseOptions(args []string) (options, bool, error) {
 			args = args[1:]
 
 		default:
-			if looksLikeCommand(args[0]) {
+			// Treat a dotless *word* as a command, but allow explicit paths
+			// (e.g. ./logo or dir/logo) to be used as image/firmware paths.
+			if looksLikeCommand(args[0]) && !strings.ContainsAny(args[0], `/\\`) {
 				printUsage(stderr)
 
 				return options, false, fmt.Errorf(
@@ -109,7 +111,6 @@ func parseOptions(args []string) (options, bool, error) {
 					args[0],
 				)
 			}
-		}
 	}
 
 	var positional []string
