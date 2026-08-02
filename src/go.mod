@@ -7,7 +7,7 @@ require (
 	github.com/linuxboot/fiano v1.2.0
 )
 
-replace github.com/linuxboot/fiano => github.com/qemus/fiano v0.0.0-20260801231203-df194951be3d
+replace github.com/linuxboot/fiano => github.com/qemus/fiano v1.2.0-1
 
 require (
 	github.com/pierrec/lz4 v2.6.1+incompatible // indirect
