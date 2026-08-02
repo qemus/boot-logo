@@ -373,6 +373,115 @@ func TestParseOptionsRejectsUnknownOption(t *testing.T) {
 	}
 }
 
+func TestParseOptionsRejectsUnknownCommand(
+	t *testing.T,
+) {
+	var output bytes.Buffer
+
+	previousStderr := stderr
+	stderr = &output
+
+	t.Cleanup(func() {
+		stderr = previousStderr
+	})
+
+	_, _, err := parseOptions([]string{
+		"supply",
+		"logo1.ffs",
+	})
+
+	if err == nil {
+		t.Fatal(
+			"parseOptions() accepted an unknown command",
+		)
+	}
+
+	if !strings.Contains(
+		err.Error(),
+		"unknown command: supply",
+	) {
+		t.Fatalf(
+			"parseOptions() error = %q, want unknown command error",
+			err,
+		)
+	}
+
+	if !strings.Contains(output.String(), "Usage:") {
+		t.Fatal(
+			"unknown command did not print usage information",
+		)
+	}
+}
+
+func TestParseOptionsAllowsDashPrefixedImageWithDoubleDash(
+	t *testing.T,
+) {
+	result, handled, err := parseOptions([]string{
+		"--",
+		"supply",
+		"logo1.ffs",
+	})
+	if err != nil {
+		t.Fatalf(
+			"parseOptions() returned an error: %v",
+			err,
+		)
+	}
+
+	if handled {
+		t.Fatal(
+			"parseOptions() unexpectedly handled the command",
+		)
+	}
+
+	if result.imagePath != "supply" {
+		t.Errorf(
+			"imagePath = %q, want %q",
+			result.imagePath,
+			"supply",
+		)
+	}
+
+	if result.firmwarePath != "logo1.ffs" {
+		t.Errorf(
+			"firmwarePath = %q, want %q",
+			result.firmwarePath,
+			"logo1.ffs",
+		)
+	}
+}
+
+func TestLooksLikeCommand(t *testing.T) {
+	tests := []struct {
+		name     string
+		argument string
+		want     bool
+	}{
+		{name: "command", argument: "replace", want: true},
+		{name: "unknown command", argument: "supply", want: true},
+		{name: "file with extension", argument: "logo.bmp", want: false},
+		{name: "relative file with extension", argument: "./logo.bmp", want: false},
+		{name: "path without extension", argument: "./logo", want: true},
+		{name: "option", argument: "--help", want: false},
+		{name: "double dash", argument: "--", want: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := looksLikeCommand(test.argument)
+
+			if got != test.want {
+				t.Fatalf(
+					"looksLikeCommand(%q) = %t, want %t",
+					test.argument,
+					got,
+					test.want,
+				)
+			}
+		})
+	}
+}
+
 func TestParseOptionsRejectsRemovedInPlaceOption(
 	t *testing.T,
 ) {
@@ -515,7 +624,6 @@ func TestParseOptionsRejectsMissingExtractArgument(
 		)
 	}
 }
-
 
 func TestPrintSuccessReplace(t *testing.T) {
 	var output bytes.Buffer
