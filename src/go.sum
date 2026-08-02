@@ -176,8 +176,8 @@ github.com/prometheus/procfs v0.0.0-20181005140218-185b4288413d/go.mod h1:c3At6R
 github.com/prometheus/procfs v0.0.0-20190507164030-5867b95ac084/go.mod h1:TjEm7ze935MbeOT/UhFTIMYKhuLP4wbCsTZCD3I8kEA=
 github.com/prometheus/procfs v0.0.2/go.mod h1:TjEm7ze935MbeOT/UhFTIMYKhuLP4wbCsTZCD3I8kEA=
 github.com/prometheus/tsdb v0.7.1/go.mod h1:qhTCs0VvXwvX/y3TZrWD7rabWM+ijKTux40TwIPHuXU=
-github.com/qemus/fiano v0.0.0-20260801231203-df194951be3d h1:i5v50JkUYnTpQsqiIT1KAuGClfYAvR7aoFauseEF2LU=
-github.com/qemus/fiano v0.0.0-20260801231203-df194951be3d/go.mod h1:HvBTukwQd5XqWHuwi/sdjK7ECnTvtbtPWC5Aj6K4iSQ=
+github.com/qemus/fiano v1.2.0-1 h1:pV6McYXCOsOdN4bjtb7fH5dAhyKwPeGIIzP4sAWEGC0=
+github.com/qemus/fiano v1.2.0-1/go.mod h1:HvBTukwQd5XqWHuwi/sdjK7ECnTvtbtPWC5Aj6K4iSQ=
 github.com/rck/unit v0.0.3/go.mod h1:jTOnzP4s1OjIP1vdxb4n76b23QPKS4EurYg7sYMr2DM=
 github.com/rekby/gpt v0.0.0-20200219180433-a930afbc6edc/go.mod h1:scrOqOnnHVKCHENvFw8k9ajCb88uqLQDA4BvuJNJ2ew=
 github.com/rivo/uniseg v0.2.0/go.mod h1:J6wj4VEh+S6ZtnVlnTBMWIodfgj8LQOQFoIToxlJtxc=
