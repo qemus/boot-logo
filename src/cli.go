@@ -99,6 +99,18 @@ func parseOptions(args []string) (options, bool, error) {
 		case string(commandVerify):
 			options.command = commandVerify
 			args = args[1:]
+
+		default:
+			// Treat a dotless *word* as a command, but allow explicit paths
+			// (e.g. ./logo or dir/logo) to be used as image/firmware paths.
+			if looksLikeCommand(args[0]) && !strings.ContainsAny(args[0], `/\\`) {
+				printUsage(stderr)
+
+				return options, false, fmt.Errorf(
+					"unknown command: %s",
+					args[0],
+				)
+			}
 		}
 	}
 
@@ -258,6 +270,17 @@ func parseOptions(args []string) (options, bool, error) {
 	}
 
 	return options, false, nil
+}
+
+func looksLikeCommand(argument string) bool {
+	if argument == "" || argument == "--" || strings.HasPrefix(argument, "-") {
+		return false
+	}
+
+	return !strings.Contains(
+		filepath.Base(argument),
+		".",
+	)
 }
 
 func samePath(first string, second string) bool {
