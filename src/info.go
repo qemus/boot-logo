@@ -117,28 +117,34 @@ func printFirmwareInfo(
 		return nil
 	}
 
-	fmt.Fprintf(writer, "Firmware: %s\n", info.Path)
-	fmt.Fprintf(writer, "Firmware type: %s\n", info.FirmwareType)
-	fmt.Fprintf(writer, "Firmware size: %d bytes\n", info.FirmwareSize)
-	fmt.Fprintf(writer, "LogoDxe GUID: %s\n", info.LogoFileGUID)
-	fmt.Fprintf(writer, "Image format: %s\n", info.ImageFormat)
-	fmt.Fprintf(
-		writer,
-		"Image dimensions: %dx%d\n",
+	output := fmt.Sprintf(
+		"Firmware: %s\n"+
+			"Firmware type: %s\n"+
+			"Firmware size: %d bytes\n"+
+			"LogoDxe GUID: %s\n"+
+			"Image format: %s\n"+
+			"Image dimensions: %dx%d\n"+
+			"Image depth: %d bits\n"+
+			"Embedded image size: %d bytes\n"+
+			"Replacement supported: %t\n",
+		info.Path,
+		info.FirmwareType,
+		info.FirmwareSize,
+		info.LogoFileGUID,
+		info.ImageFormat,
 		info.ImageWidth,
 		info.ImageHeight,
-	)
-	fmt.Fprintf(writer, "Image depth: %d bits\n", info.ImageDepth)
-	fmt.Fprintf(
-		writer,
-		"Embedded image size: %d bytes\n",
+		info.ImageDepth,
 		info.EmbeddedImageSize,
-	)
-	fmt.Fprintf(
-		writer,
-		"Replacement supported: %t\n",
 		info.ReplacementSupported,
 	)
+
+	if _, err := io.WriteString(writer, output); err != nil {
+		return fmt.Errorf(
+			"write firmware information: %w",
+			err,
+		)
+	}
 
 	return nil
 }
