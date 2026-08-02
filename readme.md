@@ -117,8 +117,6 @@ The `verify` command checks that the file:
 - Contains a valid embedded boot logo
 - Can be decoded and converted for safe replacement
 
-No files are modified.
-
 A successful verification prints:
 
 ```text
