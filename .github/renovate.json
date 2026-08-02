@@ -7,8 +7,21 @@
   "packageRules": [
     {
       "description": "Do not update the Go version",
-      "matchDatasources": ["golang-version"],
+      "matchDatasources": [
+        "golang-version"
+      ],
       "enabled": false
+    },
+    {
+      "description": "Update Fiano module tags only",
+      "matchManagers": [
+        "custom.regex"
+      ],
+      "matchDepNames": [
+        "github.com/qemus/fiano"
+      ],
+      "allowedVersions": "/^v\\d+\\.\\d+\\.\\d+-\\d+$/"
+      "ignoreUnstable": false
     }
   ],
   "customManagers": [
@@ -23,7 +36,7 @@
       "datasourceTemplate": "git-refs",
       "depNameTemplate": "github.com/qemus/fiano",
       "packageNameTemplate": "https://github.com/qemus/fiano.git",
-      "currentValueTemplate": "{{{currentValue}}}"
+      "versioningTemplate": "semver"
     }
   ]
 }
