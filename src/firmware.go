@@ -30,6 +30,99 @@ type logoFinder struct {
 }
 
 func replaceBootLogo(
+	replacementPath string,
+	firmwarePath string,
+	outputPath string,
+) error {
+	replacementData, err := os.ReadFile(replacementPath)
+	if err != nil {
+		return fmt.Errorf(
+			"read replacement %q: %w",
+			replacementPath,
+			err,
+		)
+	}
+
+	if replacementFile, ok := parseStandaloneFFS(
+		replacementData,
+	); ok {
+		return replaceBootLogoFile(
+			replacementFile,
+			replacementData,
+			firmwarePath,
+			outputPath,
+		)
+	}
+
+	return replaceBootLogoImage(
+		replacementPath,
+		firmwarePath,
+		outputPath,
+	)
+}
+
+func replaceBootLogoFile(
+	replacementFile *uefi.File,
+	replacementData []byte,
+	firmwarePath string,
+	outputPath string,
+) error {
+	if replacementFile == nil {
+		return fmt.Errorf(
+			"replacement FFS file is nil",
+		)
+	}
+
+	if replacementFile.Header.GUID != logoFileGUID {
+		return fmt.Errorf(
+			"replacement FFS GUID is %s, want LogoDxe GUID %s",
+			replacementFile.Header.GUID.String(),
+			logoFileGUID.String(),
+		)
+	}
+
+	firmware, err := readFirmware(firmwarePath)
+	if err != nil {
+		return err
+	}
+
+	destinationFile, err := findLogoFile(firmware)
+	if err != nil {
+		return err
+	}
+
+	if standaloneFile, ok := firmware.(*uefi.File); ok &&
+		standaloneFile == destinationFile {
+		return writeFirmwareOutput(
+			replacementData,
+			firmwarePath,
+			outputPath,
+		)
+	}
+
+	replacer := &visitors.Insert{
+		Predicate: visitors.FindFileGUIDPredicate(
+			logoFileGUID,
+		),
+		NewFile:    replacementFile,
+		InsertType: visitors.InsertTypeReplaceFFS,
+	}
+
+	if err := replacer.Run(firmware); err != nil {
+		return fmt.Errorf(
+			"replace LogoDxe FFS file: %w",
+			err,
+		)
+	}
+
+	return assembleAndWriteFirmware(
+		firmware,
+		firmwarePath,
+		outputPath,
+	)
+}
+
+func replaceBootLogoImage(
 	imagePath string,
 	firmwarePath string,
 	outputPath string,
@@ -116,6 +209,18 @@ func replaceBootLogo(
 
 	matchedFile.Modified = true
 
+	return assembleAndWriteFirmware(
+		firmware,
+		firmwarePath,
+		outputPath,
+	)
+}
+
+func assembleAndWriteFirmware(
+	firmware uefi.Firmware,
+	firmwarePath string,
+	outputPath string,
+) error {
 	assembler := &visitors.Assemble{}
 
 	if err := assembler.Run(firmware); err != nil {
@@ -133,6 +238,18 @@ func replaceBootLogo(
 		)
 	}
 
+	return writeFirmwareOutput(
+		output,
+		firmwarePath,
+		outputPath,
+	)
+}
+
+func writeFirmwareOutput(
+	output []byte,
+	firmwarePath string,
+	outputPath string,
+) error {
 	mode, err := fileMode(firmwarePath)
 	if err != nil {
 		return err
@@ -256,6 +373,48 @@ func parseStandaloneFFS(
 	}
 
 	return file, true
+}
+
+func findLogoFile(
+	firmware uefi.Firmware,
+) (*uefi.File, error) {
+	finder := &visitors.Find{
+		Predicate: visitors.FindFileGUIDPredicate(
+			logoFileGUID,
+		),
+	}
+
+	if err := finder.Run(firmware); err != nil {
+		return nil, fmt.Errorf(
+			"find LogoDxe file: %w",
+			err,
+		)
+	}
+
+	switch len(finder.Matches) {
+	case 0:
+		return nil, fmt.Errorf(
+			"LogoDxe file %s was not found",
+			logoFileGUID.String(),
+		)
+
+	case 1:
+		file, ok := finder.Matches[0].(*uefi.File)
+		if !ok {
+			return nil, fmt.Errorf(
+				"matched LogoDxe object is %T, want *uefi.File",
+				finder.Matches[0],
+			)
+		}
+
+		return file, nil
+
+	default:
+		return nil, fmt.Errorf(
+			"multiple LogoDxe files were found: %d",
+			len(finder.Matches),
+		)
+	}
 }
 
 func findBootLogo(
