@@ -104,8 +104,8 @@ jobs:
         name: Rename binaries
         if: env.exists == 'false'
         run: |
-          mv output/linux_amd64/boot-logo.bin output/boot-logo-amd64.bin
-          mv output/linux_arm64/boot-logo.bin output/boot-logo-arm64.bin
+          mv output/linux_amd64/boot-logo.bin output/boot-logo_amd64.bin
+          mv output/linux_arm64/boot-logo.bin output/boot-logo_arm64.bin
 
       -
         name: Create a release
