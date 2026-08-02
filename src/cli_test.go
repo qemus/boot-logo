@@ -413,7 +413,7 @@ func TestParseOptionsRejectsUnknownCommand(
 	}
 }
 
-func TestParseOptionsAllowsDashPrefixedImageWithDoubleDash(
+func TestParseOptionsAllowsDotlessImageWithDoubleDash(
 	t *testing.T,
 ) {
 	result, handled, err := parseOptions([]string{
