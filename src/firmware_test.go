@@ -262,6 +262,97 @@ func TestReplaceBootLogoFixturesSeparateOutput(t *testing.T) {
 	}
 }
 
+func TestReplaceBootLogoStandardROM(t *testing.T) {
+	outputPath := filepath.Join(
+		t.TempDir(),
+		"standard.rom",
+	)
+
+	if err := replaceBootLogo(
+		fixturePath("test.bmp"),
+		fixturePath("standard.rom"),
+		outputPath,
+	); err != nil {
+		t.Fatalf(
+			"replaceBootLogo() returned an error: %v",
+			err,
+		)
+	}
+
+	original := readFixture(t, "standard.rom")
+	updated, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf(
+			"read updated standard ROM: %v",
+			err,
+		)
+	}
+
+	if bytes.Equal(updated, original) {
+		t.Fatal(
+			"replacement did not modify standard.rom",
+		)
+	}
+
+	replacementData := readFixture(t, "test.bmp")
+	replacement, err := decodeBitmap(replacementData)
+	if err != nil {
+		t.Fatalf(
+			"decode tests/test.bmp: %v",
+			err,
+		)
+	}
+
+	firmware, err := readFirmware(outputPath)
+	if err != nil {
+		t.Fatalf(
+			"updated standard ROM cannot be parsed: %v",
+			err,
+		)
+	}
+
+	match, err := findBootLogo(firmware)
+	if err != nil {
+		t.Fatalf(
+			"updated standard ROM does not contain a logo: %v",
+			err,
+		)
+	}
+
+	payload, err := sectionPayload(match.section)
+	if err != nil {
+		t.Fatalf(
+			"sectionPayload() returned an error: %v",
+			err,
+		)
+	}
+
+	actual, err := decodeHIIImage(
+		payload,
+		match.location,
+	)
+	if err != nil {
+		t.Fatalf(
+			"decode inserted boot logo: %v",
+			err,
+		)
+	}
+
+	actualBounds := actual.Bounds()
+	replacementBounds := replacement.Bounds()
+
+	if actualBounds.Dx() != replacementBounds.Dx() ||
+		actualBounds.Dy() != replacementBounds.Dy() {
+		t.Fatalf(
+			"inserted logo dimensions = %dx%d, want %dx%d",
+			actualBounds.Dx(),
+			actualBounds.Dy(),
+			replacementBounds.Dx(),
+			replacementBounds.Dy(),
+		)
+	}
+}
+
 func TestReplaceBootLogoFixturesFromStandaloneFFS(t *testing.T) {
 	outputModes := []struct {
 		name     string
