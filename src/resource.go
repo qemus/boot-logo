@@ -1162,6 +1162,13 @@ func replaceHIIImage(
 				)
 			}
 
+			if paletteInfoOffset < hiiImagePackageHeaderSize ||
+				paletteInfoOffset+2 > len(newPackage) {
+				return nil, fmt.Errorf(
+					"updated HII palette information offset is invalid",
+				)
+			}
+
 			binary.LittleEndian.PutUint16(
 				newPackage[paletteInfoOffset:paletteInfoOffset+2],
 				uint16(paletteCount+1),
