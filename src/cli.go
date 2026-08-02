@@ -190,9 +190,12 @@ func parseOptions(args []string) (options, bool, error) {
 		)
 	}
 
-	if options.quiet && options.command != commandVerify {
+	if options.quiet &&
+		options.command != commandReplace &&
+		options.command != commandExtract &&
+		options.command != commandVerify {
 		return options, false, fmt.Errorf(
-			"--quiet is only supported by the verify command",
+			"--quiet is only supported by replace, extract and verify",
 		)
 	}
 
@@ -302,6 +305,10 @@ func printSuccess(
 ) error {
 	switch options.command {
 	case commandReplace:
+		if options.quiet {
+			return nil
+		}
+
 		_, err := fmt.Fprintf(
 			writer,
 			"Boot logo replaced successfully: %s\n",
@@ -311,6 +318,10 @@ func printSuccess(
 		return err
 
 	case commandExtract:
+		if options.quiet {
+			return nil
+		}
+
 		_, err := fmt.Fprintf(
 			writer,
 			"Boot logo extracted successfully: %s\n",
@@ -355,7 +366,7 @@ Commands:
 Options:
   -o, --output <path>  Write to a different output path
       --json           Print info as JSON
-  -q, --quiet          Suppress successful verify output
+  -q, --quiet          Suppress the output
   -h, --help           Show usage information
   -v, --version        Show version information
 

@@ -112,7 +112,7 @@ boot-logo verify firmware.fd
 
 The `verify` command checks that the file:
 
-- Is a supported UEFI firmware image or standalone FFS file
+- Is a supported UEFI firmware image or FFS file
 - Contains exactly one supported `LogoDxe` file
 - Contains a valid embedded boot logo
 - Can be decoded and converted for safe replacement
@@ -123,12 +123,6 @@ A successful verification prints:
 Firmware verified successfully: firmware.fd
 ```
 
-Use quiet mode when only the exit status is needed:
-
-```bash
-boot-logo verify firmware.fd --quiet
-```
-
 The command exits with a non-zero status and prints an error when verification fails, making it suitable for scripts and CI workflows.
 
 ### Options
@@ -136,7 +130,7 @@ The command exits with a non-zero status and prints an error when verification f
 ```text
 -o, --output <path>  Write to a different output path
     --json           Print info as JSON
--q, --quiet          Suppress successful verify output
+-q, --quiet          Suppress the output
 -h, --help           Show usage information
 -v, --version        Show version information
 ```
