@@ -1416,7 +1416,7 @@ func encodeHII8BitImage(
 	block := make([]byte, 6+pixelLength)
 
 	block[0] = hiiImage8Bit
-
+	block[1] = 1
 	binary.LittleEndian.PutUint16(
 		block[2:4],
 		uint16(width),
