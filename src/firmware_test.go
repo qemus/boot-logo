@@ -263,6 +263,11 @@ func TestReplaceBootLogoFixturesSeparateOutput(t *testing.T) {
 }
 
 func TestReplaceBootLogoStandardROM(t *testing.T) {
+	originalPE := readBootLogoPE(
+		t,
+		fixturePath("standard.rom"),
+	)
+
 	outputPath := filepath.Join(
 		t.TempDir(),
 		"standard.rom",
@@ -351,6 +356,12 @@ func TestReplaceBootLogoStandardROM(t *testing.T) {
 			replacementBounds.Dy(),
 		)
 	}
+
+	assertFinalPERelocationMoved(
+		t,
+		originalPE,
+		payload,
+	)
 }
 
 func TestReplaceBootLogoFixturesFromStandaloneFFS(t *testing.T) {
@@ -1030,4 +1041,204 @@ func mirrorFixtureImageHorizontally(source image.Image) *image.NRGBA {
 		}
 	}
 	return output
+}
+
+func readBootLogoPE(
+	t *testing.T,
+	firmwarePath string,
+) []byte {
+	t.Helper()
+
+	firmware, err := readFirmware(firmwarePath)
+	if err != nil {
+		t.Fatalf(
+			"read firmware %q: %v",
+			firmwarePath,
+			err,
+		)
+	}
+
+	match, err := findBootLogo(firmware)
+	if err != nil {
+		t.Fatalf(
+			"find boot logo in %q: %v",
+			firmwarePath,
+			err,
+		)
+	}
+
+	payload, err := sectionPayload(match.section)
+	if err != nil {
+		t.Fatalf(
+			"read LogoDxe PE32 payload from %q: %v",
+			firmwarePath,
+			err,
+		)
+	}
+
+	return append([]byte(nil), payload...)
+}
+
+func assertFinalPERelocationMoved(
+	t *testing.T,
+	original []byte,
+	updated []byte,
+) {
+	t.Helper()
+
+	originalResource, err := findHIIResource(original)
+	if err != nil {
+		t.Fatalf(
+			"find original HII resource: %v",
+			err,
+		)
+	}
+
+	updatedResource, err := findHIIResource(updated)
+	if err != nil {
+		t.Fatalf(
+			"find updated HII resource: %v",
+			err,
+		)
+	}
+
+	originalRelocation := findPESectionByNameForTest(
+		t,
+		originalResource.sections,
+		".reloc",
+	)
+
+	updatedRelocation := findPESectionByNameForTest(
+		t,
+		updatedResource.sections,
+		".reloc",
+	)
+
+	if updatedResource.section.virtualAddress !=
+		originalResource.section.virtualAddress {
+		t.Fatalf(
+			".rsrc RVA changed from %#x to %#x",
+			originalResource.section.virtualAddress,
+			updatedResource.section.virtualAddress,
+		)
+	}
+
+	if updatedResource.section.virtualSize <=
+		originalResource.section.virtualSize {
+		t.Fatalf(
+			".rsrc did not grow: old size %#x, new size %#x",
+			originalResource.section.virtualSize,
+			updatedResource.section.virtualSize,
+		)
+	}
+
+	if updatedRelocation.virtualAddress <=
+		originalRelocation.virtualAddress {
+		t.Fatalf(
+			".reloc did not move forward: old RVA %#x, new RVA %#x",
+			originalRelocation.virtualAddress,
+			updatedRelocation.virtualAddress,
+		)
+	}
+
+	if updatedResource.sectionAlignment < 0x1000 &&
+		updatedResource.sectionAlignment ==
+			updatedResource.fileAlignment &&
+		updatedRelocation.rawOffset !=
+			updatedRelocation.virtualAddress {
+		t.Fatalf(
+			"low-alignment .reloc raw offset %#x does not match RVA %#x",
+			updatedRelocation.rawOffset,
+			updatedRelocation.virtualAddress,
+		)
+	}
+
+	originalRelocationStart :=
+		int(originalRelocation.rawOffset)
+
+	originalRelocationEnd :=
+		originalRelocationStart +
+			int(originalRelocation.rawSize)
+
+	updatedRelocationStart :=
+		int(updatedRelocation.rawOffset)
+
+	updatedRelocationEnd :=
+		updatedRelocationStart +
+			int(updatedRelocation.rawSize)
+
+	originalRelocationData :=
+		original[originalRelocationStart:originalRelocationEnd]
+
+	updatedRelocationData :=
+		updated[updatedRelocationStart:updatedRelocationEnd]
+
+	if !bytes.Equal(
+		updatedRelocationData,
+		originalRelocationData,
+	) {
+		t.Fatal(
+			"moving .reloc changed its contents",
+		)
+	}
+
+	originalDirectoryOffset :=
+		originalResource.relocationRVA -
+			originalRelocation.virtualAddress
+
+	updatedDirectoryOffset :=
+		updatedResource.relocationRVA -
+			updatedRelocation.virtualAddress
+
+	if updatedDirectoryOffset != originalDirectoryOffset {
+		t.Fatalf(
+			"base relocation directory offset changed from %#x to %#x",
+			originalDirectoryOffset,
+			updatedDirectoryOffset,
+		)
+	}
+
+	for _, originalSection := range originalResource.sections {
+		if originalSection.name == ".rsrc" ||
+			originalSection.name == ".reloc" {
+			continue
+		}
+
+		updatedSection := findPESectionByNameForTest(
+			t,
+			updatedResource.sections,
+			originalSection.name,
+		)
+
+		if updatedSection.virtualAddress !=
+			originalSection.virtualAddress {
+			t.Fatalf(
+				"section %q RVA changed from %#x to %#x",
+				originalSection.name,
+				originalSection.virtualAddress,
+				updatedSection.virtualAddress,
+			)
+		}
+	}
+}
+
+func findPESectionByNameForTest(
+	t *testing.T,
+	sections []peSectionInfo,
+	name string,
+) peSectionInfo {
+	t.Helper()
+
+	for _, section := range sections {
+		if section.name == name {
+			return section
+		}
+	}
+
+	t.Fatalf(
+		"PE section %q was not found",
+		name,
+	)
+
+	return peSectionInfo{}
 }
