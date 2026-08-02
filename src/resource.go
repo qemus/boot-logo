@@ -12,13 +12,14 @@ import (
 )
 
 const (
-	peDOSSignature           = 0x5a4d
-	peSignature              = 0x00004550
-	peOptionalHeader32Magic  = 0x010b
-	peOptionalHeader64Magic  = 0x020b
-	peFileHeaderSize         = 20
-	peSectionHeaderSize      = 40
-	peResourceDirectoryIndex = 2
+	peDOSSignature             = 0x5a4d
+	peSignature                = 0x00004550
+	peOptionalHeader32Magic    = 0x010b
+	peOptionalHeader64Magic    = 0x020b
+	peFileHeaderSize           = 20
+	peSectionHeaderSize        = 40
+	peResourceDirectoryIndex   = 2
+	peRelocationDirectoryIndex = 5
 
 	peResourceDirectoryHeaderSize = 16
 	peResourceDirectoryEntrySize  = 8
@@ -60,6 +61,7 @@ var errHIIResourceNotFound = errors.New(
 )
 
 type peSectionInfo struct {
+	name           string
 	headerOffset   int
 	virtualSize    uint32
 	virtualAddress uint32
@@ -72,10 +74,13 @@ type peResourceInfo struct {
 	sizeOfImageOffset           int
 	checksumOffset              int
 	directorySizeOffset         int
+	relocationDirectoryOffset   int
 
 	fileAlignment    uint32
 	sectionAlignment uint32
 	directorySize    uint32
+	relocationRVA    uint32
+	relocationSize   uint32
 
 	section  peSectionInfo
 	sections []peSectionInfo
@@ -83,6 +88,13 @@ type peResourceInfo struct {
 	dataEntryOffset int
 	dataOffset      int
 	dataSize        int
+}
+
+type peVirtualGrowthPlan struct {
+	sections                      []peSectionInfo
+	movedRelocationHeaderOffset   int
+	movedRelocationVirtualAddress uint32
+	relocationDirectoryRVA        uint32
 }
 
 type hiiImageLocation struct {
@@ -1743,6 +1755,30 @@ func findHIIResource(
 		data[resourceDirectoryEntryOffset+4 : resourceDirectoryEntryOffset+8],
 	)
 
+	relocationDirectoryOffset := -1
+	var relocationRVA uint32
+	var relocationSize uint32
+
+	if numberOfDirectories > peRelocationDirectoryIndex {
+		relocationDirectoryOffset =
+			dataDirectoryOffset +
+				peRelocationDirectoryIndex*8
+
+		if relocationDirectoryOffset+8 > optionalEnd {
+			return peResourceInfo{}, fmt.Errorf(
+				"PE base relocation directory entry is incomplete",
+			)
+		}
+
+		relocationRVA = binary.LittleEndian.Uint32(
+			data[relocationDirectoryOffset : relocationDirectoryOffset+4],
+		)
+
+		relocationSize = binary.LittleEndian.Uint32(
+			data[relocationDirectoryOffset+4 : relocationDirectoryOffset+8],
+		)
+	}
+
 	if resourceRVA == 0 ||
 		resourceDirectorySize == 0 {
 		return peResourceInfo{},
@@ -1869,11 +1905,17 @@ func findHIIResource(
 
 		directorySizeOffset: resourceDirectoryEntryOffset + 4,
 
+		relocationDirectoryOffset: relocationDirectoryOffset,
+
 		fileAlignment: fileAlignment,
 
 		sectionAlignment: sectionAlignment,
 
 		directorySize: resourceDirectorySize,
+
+		relocationRVA: relocationRVA,
+
+		relocationSize: relocationSize,
 
 		section: dataSection,
 
@@ -1919,7 +1961,20 @@ func parsePESections(
 		headerOffset :=
 			offset + index*peSectionHeaderSize
 
+		nameEnd := bytes.IndexByte(
+			data[headerOffset:headerOffset+8],
+			0,
+		)
+
+		if nameEnd < 0 {
+			nameEnd = 8
+		}
+
 		section := peSectionInfo{
+			name: string(
+				data[headerOffset : headerOffset+nameEnd],
+			),
+
 			headerOffset: headerOffset,
 
 			virtualSize: binary.LittleEndian.Uint32(
@@ -2319,10 +2374,30 @@ func replacePEResourceData(
 		resourceRelativeStart +
 			len(newResource)
 
+	resourceDelta :=
+		int64(len(newResource)) -
+			int64(resource.dataSize)
+
+	newDirectorySize :=
+		int64(resource.directorySize) +
+			resourceDelta
+
+	if newDirectorySize <= 0 ||
+		uint64(newDirectorySize) >
+			maxUint32Value {
+		return nil, fmt.Errorf(
+			"updated PE resource directory size is invalid",
+		)
+	}
+
 	newVirtualSize := int(section.virtualSize)
 
 	if newVirtualSize < requiredVirtualSize {
 		newVirtualSize = requiredVirtualSize
+	}
+
+	if int64(newVirtualSize) < newDirectorySize {
+		newVirtualSize = int(newDirectorySize)
 	}
 
 	if uint64(newVirtualSize) > maxUint32Value {
@@ -2331,19 +2406,30 @@ func replacePEResourceData(
 		)
 	}
 
-	if err := checkPEVirtualGrowth(
-		resource.sections,
-		section,
+	growthPlan, err := planPEVirtualGrowth(
+		resource,
 		uint32(newVirtualSize),
-	); err != nil {
+	)
+	if err != nil {
 		return nil, err
 	}
 
 	newRawSize := oldRawSize
+	requiredRawSize :=
+		resourceRelativeStart +
+			len(newResource) +
+			(oldRawSize - resourceRelativeEnd)
 
-	if requiredVirtualSize > oldRawSize {
+	if newVirtualSize > oldRawSize ||
+		requiredRawSize > oldRawSize {
+		rawSizeRequirement := newVirtualSize
+
+		if requiredRawSize > rawSizeRequirement {
+			rawSizeRequirement = requiredRawSize
+		}
+
 		alignedRawSize, err := alignValue(
-			uint64(requiredVirtualSize),
+			uint64(rawSizeRequirement),
 			uint64(resource.fileAlignment),
 		)
 		if err != nil {
@@ -2362,6 +2448,31 @@ func replacePEResourceData(
 
 	rawDelta :=
 		newRawSize - oldRawSize
+
+	if growthPlan.movedRelocationHeaderOffset >= 0 &&
+		resource.sectionAlignment < 0x1000 &&
+		resource.sectionAlignment == resource.fileAlignment {
+		var relocationRawOffset uint32
+
+		for _, other := range resource.sections {
+			if other.headerOffset ==
+				growthPlan.movedRelocationHeaderOffset {
+				relocationRawOffset = other.rawOffset
+				break
+			}
+		}
+
+		newRelocationRawOffset :=
+			uint64(relocationRawOffset) +
+				uint64(rawDelta)
+
+		if newRelocationRawOffset !=
+			uint64(growthPlan.movedRelocationVirtualAddress) {
+			return nil, fmt.Errorf(
+				"moving the final PE .reloc section would violate low-alignment layout requirements",
+			)
+		}
+	}
 
 	newLength64 :=
 		uint64(len(data)) +
@@ -2393,6 +2504,16 @@ func replacePEResourceData(
 		newResource,
 	)
 
+	newResourceEnd :=
+		rawStart +
+			resourceRelativeStart +
+			len(newResource)
+
+	copy(
+		output[newResourceEnd:newResourceEnd+oldRawSize-resourceRelativeEnd],
+		data[rawStart+resourceRelativeEnd:oldRawEnd],
+	)
+
 	copy(
 		output[rawStart+newRawSize:],
 		data[oldRawEnd:],
@@ -2407,6 +2528,21 @@ func replacePEResourceData(
 		output[section.headerOffset+16:section.headerOffset+20],
 		uint32(newRawSize),
 	)
+
+	if growthPlan.movedRelocationHeaderOffset >= 0 {
+		relocationHeaderOffset :=
+			growthPlan.movedRelocationHeaderOffset
+
+		binary.LittleEndian.PutUint32(
+			output[relocationHeaderOffset+12:relocationHeaderOffset+16],
+			growthPlan.movedRelocationVirtualAddress,
+		)
+
+		binary.LittleEndian.PutUint32(
+			output[resource.relocationDirectoryOffset:resource.relocationDirectoryOffset+4],
+			growthPlan.relocationDirectoryRVA,
+		)
+	}
 
 	if rawDelta != 0 {
 		for _, other := range resource.sections {
@@ -2437,22 +2573,6 @@ func replacePEResourceData(
 		uint32(len(newResource)),
 	)
 
-	resourceDelta :=
-		int64(len(newResource)) -
-			int64(resource.dataSize)
-
-	newDirectorySize :=
-		int64(resource.directorySize) +
-			resourceDelta
-
-	if newDirectorySize <= 0 ||
-		uint64(newDirectorySize) >
-			maxUint32Value {
-		return nil, fmt.Errorf(
-			"updated PE resource directory size is invalid",
-		)
-	}
-
 	binary.LittleEndian.PutUint32(
 		output[resource.directorySizeOffset:resource.directorySizeOffset+4],
 		uint32(newDirectorySize),
@@ -2482,9 +2602,7 @@ func replacePEResourceData(
 	)
 
 	newSizeOfImage, err := calculatePESizeOfImage(
-		resource.sections,
-		section.headerOffset,
-		uint32(newVirtualSize),
+		growthPlan.sections,
 		resource.sectionAlignment,
 	)
 	if err != nil {
@@ -2504,47 +2622,178 @@ func replacePEResourceData(
 	return output, nil
 }
 
-func checkPEVirtualGrowth(
-	sections []peSectionInfo,
-	updated peSectionInfo,
+func planPEVirtualGrowth(
+	resource peResourceInfo,
 	newVirtualSize uint32,
-) error {
-	var nextAddress uint32
+) (peVirtualGrowthPlan, error) {
+	plan := peVirtualGrowthPlan{
+		sections: append(
+			[]peSectionInfo(nil),
+			resource.sections...,
+		),
+		movedRelocationHeaderOffset: -1,
+	}
 
-	for _, section := range sections {
+	updatedIndex := -1
+
+	for index := range plan.sections {
+		if plan.sections[index].headerOffset ==
+			resource.section.headerOffset {
+			updatedIndex = index
+			break
+		}
+	}
+
+	if updatedIndex < 0 {
+		return peVirtualGrowthPlan{}, fmt.Errorf(
+			"PE resource section was not found in the section table",
+		)
+	}
+
+	plan.sections[updatedIndex].virtualSize =
+		newVirtualSize
+
+	updated := plan.sections[updatedIndex]
+	var laterIndexes []int
+	var nextIndex = -1
+
+	for index, section := range plan.sections {
 		if section.virtualAddress <=
 			updated.virtualAddress {
 			continue
 		}
 
-		if nextAddress == 0 ||
-			section.virtualAddress < nextAddress {
-			nextAddress =
-				section.virtualAddress
+		laterIndexes = append(
+			laterIndexes,
+			index,
+		)
+
+		if nextIndex < 0 ||
+			section.virtualAddress <
+				plan.sections[nextIndex].virtualAddress {
+			nextIndex = index
 		}
 	}
 
-	if nextAddress == 0 {
-		return nil
+	if nextIndex < 0 {
+		return plan, nil
 	}
 
 	available :=
-		uint64(nextAddress) -
+		uint64(plan.sections[nextIndex].virtualAddress) -
 			uint64(updated.virtualAddress)
 
-	if uint64(newVirtualSize) > available {
-		return fmt.Errorf(
+	if uint64(newVirtualSize) <= available {
+		return plan, nil
+	}
+
+	if len(laterIndexes) != 1 ||
+		plan.sections[nextIndex].name != ".reloc" {
+		return peVirtualGrowthPlan{}, fmt.Errorf(
 			"updated HII resource does not fit before the next PE section",
 		)
 	}
 
-	return nil
+	relocation := plan.sections[nextIndex]
+
+	updatedRawEnd := uint64(updated.rawOffset) + uint64(updated.rawSize)
+	if relocation.rawSize == 0 ||
+		uint64(relocation.rawOffset) < updatedRawEnd {
+		return peVirtualGrowthPlan{}, fmt.Errorf(
+			"final PE .reloc section cannot be moved safely",
+		)
+	}
+
+	for _, section := range plan.sections {
+		if section.headerOffset == relocation.headerOffset ||
+			section.rawSize == 0 {
+			continue
+		}
+
+		if section.rawOffset > relocation.rawOffset {
+			return peVirtualGrowthPlan{}, fmt.Errorf(
+				"PE .reloc section is not the final raw section",
+			)
+		}
+	}
+
+	if resource.relocationDirectoryOffset < 0 ||
+		resource.relocationRVA == 0 ||
+		resource.relocationSize == 0 {
+		return peVirtualGrowthPlan{}, fmt.Errorf(
+			"PE base relocation directory is missing",
+		)
+	}
+
+	relocationSpan := relocation.virtualSize
+	if relocation.rawSize > relocationSpan {
+		relocationSpan = relocation.rawSize
+	}
+
+	relocationEnd :=
+		uint64(relocation.virtualAddress) +
+			uint64(relocationSpan)
+
+	directoryEnd :=
+		uint64(resource.relocationRVA) +
+			uint64(resource.relocationSize)
+
+	if resource.relocationRVA < relocation.virtualAddress ||
+		directoryEnd > relocationEnd {
+		return peVirtualGrowthPlan{}, fmt.Errorf(
+			"PE base relocation directory is outside the final .reloc section",
+		)
+	}
+
+	resourceEnd :=
+		uint64(updated.virtualAddress) +
+			uint64(newVirtualSize)
+
+	newRelocationAddress, err := alignValue(
+		resourceEnd,
+		uint64(resource.sectionAlignment),
+	)
+	if err != nil {
+		return peVirtualGrowthPlan{}, err
+	}
+
+	if newRelocationAddress > maxUint32Value {
+		return peVirtualGrowthPlan{}, fmt.Errorf(
+			"updated PE relocation section address is too large",
+		)
+	}
+
+	directoryRelativeOffset :=
+		uint64(resource.relocationRVA) -
+			uint64(relocation.virtualAddress)
+
+	newRelocationDirectoryRVA :=
+		newRelocationAddress +
+			directoryRelativeOffset
+
+	if newRelocationDirectoryRVA > maxUint32Value {
+		return peVirtualGrowthPlan{}, fmt.Errorf(
+			"updated PE base relocation directory address is too large",
+		)
+	}
+
+	plan.sections[nextIndex].virtualAddress =
+		uint32(newRelocationAddress)
+
+	plan.movedRelocationHeaderOffset =
+		relocation.headerOffset
+
+	plan.movedRelocationVirtualAddress =
+		uint32(newRelocationAddress)
+
+	plan.relocationDirectoryRVA =
+		uint32(newRelocationDirectoryRVA)
+
+	return plan, nil
 }
 
 func calculatePESizeOfImage(
 	sections []peSectionInfo,
-	updatedHeaderOffset int,
-	updatedVirtualSize uint32,
 	sectionAlignment uint32,
 ) (uint32, error) {
 	var maximum uint64
@@ -2552,15 +2801,8 @@ func calculatePESizeOfImage(
 	for _, section := range sections {
 		virtualSize := section.virtualSize
 
-		if section.headerOffset ==
-			updatedHeaderOffset {
-			virtualSize =
-				updatedVirtualSize
-		}
-
 		if virtualSize == 0 {
-			virtualSize =
-				section.rawSize
+			virtualSize = section.rawSize
 		}
 
 		end :=

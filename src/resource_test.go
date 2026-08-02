@@ -326,3 +326,187 @@ func TestReplaceHIIImageAddsExactPalette(t *testing.T) {
 		}
 	}
 }
+
+func TestPlanPEVirtualGrowthMovesFinalRelocationSection(t *testing.T) {
+	resourceSection := peSectionInfo{
+		name:           ".rsrc",
+		headerOffset:   0x180,
+		virtualSize:    0x2f80,
+		virtualAddress: 0x05c0,
+		rawSize:        0x2f80,
+		rawOffset:      0x0600,
+	}
+
+	relocationSection := peSectionInfo{
+		name:           ".reloc",
+		headerOffset:   0x1a8,
+		virtualSize:    0x0c,
+		virtualAddress: 0x3540,
+		rawSize:        0x40,
+		rawOffset:      0x3580,
+	}
+
+	resource := peResourceInfo{
+		sectionAlignment:          0x40,
+		relocationDirectoryOffset: 0x128,
+		relocationRVA:             relocationSection.virtualAddress,
+		relocationSize:            0x0c,
+		section:                   resourceSection,
+		sections: []peSectionInfo{
+			{
+				name:           ".text",
+				headerOffset:   0x130,
+				virtualSize:    0x180,
+				virtualAddress: 0x0240,
+				rawSize:        0x180,
+				rawOffset:      0x0240,
+			},
+			{
+				name:           ".data",
+				headerOffset:   0x158,
+				virtualSize:    0x200,
+				virtualAddress: 0x03c0,
+				rawSize:        0x200,
+				rawOffset:      0x03c0,
+			},
+			resourceSection,
+			relocationSection,
+		},
+	}
+
+	const newVirtualSize = 0xed20
+
+	plan, err := planPEVirtualGrowth(
+		resource,
+		newVirtualSize,
+	)
+	if err != nil {
+		t.Fatalf(
+			"planPEVirtualGrowth() returned an error: %v",
+			err,
+		)
+	}
+
+	expectedAddress64, err := alignValue(
+		uint64(resourceSection.virtualAddress)+newVirtualSize,
+		uint64(resource.sectionAlignment),
+	)
+	if err != nil {
+		t.Fatalf("alignValue() returned an error: %v", err)
+	}
+
+	expectedAddress := uint32(expectedAddress64)
+
+	if plan.movedRelocationHeaderOffset !=
+		relocationSection.headerOffset {
+		t.Fatalf(
+			"moved relocation header offset = %#x, want %#x",
+			plan.movedRelocationHeaderOffset,
+			relocationSection.headerOffset,
+		)
+	}
+
+	if plan.movedRelocationVirtualAddress !=
+		expectedAddress {
+		t.Fatalf(
+			"moved relocation address = %#x, want %#x",
+			plan.movedRelocationVirtualAddress,
+			expectedAddress,
+		)
+	}
+
+	if plan.relocationDirectoryRVA !=
+		expectedAddress {
+		t.Fatalf(
+			"relocation directory RVA = %#x, want %#x",
+			plan.relocationDirectoryRVA,
+			expectedAddress,
+		)
+	}
+
+	for _, section := range plan.sections {
+		switch section.name {
+		case ".text":
+			if section.virtualAddress != 0x0240 {
+				t.Fatalf(
+					".text RVA = %#x, want %#x",
+					section.virtualAddress,
+					0x0240,
+				)
+			}
+
+		case ".data":
+			if section.virtualAddress != 0x03c0 {
+				t.Fatalf(
+					".data RVA = %#x, want %#x",
+					section.virtualAddress,
+					0x03c0,
+				)
+			}
+
+		case ".rsrc":
+			if section.virtualAddress !=
+				resourceSection.virtualAddress {
+				t.Fatalf(
+					".rsrc RVA = %#x, want %#x",
+					section.virtualAddress,
+					resourceSection.virtualAddress,
+				)
+			}
+
+			if section.virtualSize != newVirtualSize {
+				t.Fatalf(
+					".rsrc virtual size = %#x, want %#x",
+					section.virtualSize,
+					newVirtualSize,
+				)
+			}
+
+		case ".reloc":
+			if section.virtualAddress != expectedAddress {
+				t.Fatalf(
+					".reloc RVA = %#x, want %#x",
+					section.virtualAddress,
+					expectedAddress,
+				)
+			}
+		}
+	}
+}
+
+func TestPlanPEVirtualGrowthRejectsMovingOrdinarySection(t *testing.T) {
+	resourceSection := peSectionInfo{
+		name:           ".rsrc",
+		headerOffset:   0x100,
+		virtualSize:    0x100,
+		virtualAddress: 0x1000,
+		rawSize:        0x100,
+		rawOffset:      0x200,
+	}
+
+	resource := peResourceInfo{
+		sectionAlignment: 0x1000,
+		section:          resourceSection,
+		sections: []peSectionInfo{
+			resourceSection,
+			{
+				name:           ".data",
+				headerOffset:   0x128,
+				virtualSize:    0x100,
+				virtualAddress: 0x2000,
+				rawSize:        0x100,
+				rawOffset:      0x300,
+			},
+		},
+	}
+
+	_, err := planPEVirtualGrowth(
+		resource,
+		0x1100,
+	)
+	if err == nil {
+		t.Fatal(
+			"planPEVirtualGrowth() moved a non-relocation section",
+		)
+	}
+}
