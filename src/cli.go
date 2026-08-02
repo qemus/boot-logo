@@ -12,6 +12,8 @@ type command string
 const (
 	commandReplace command = "replace"
 	commandExtract command = "extract"
+	commandInfo    command = "info"
+	commandVerify  command = "verify"
 )
 
 type options struct {
@@ -19,6 +21,8 @@ type options struct {
 	imagePath    string
 	firmwarePath string
 	outputPath   string
+	json         bool
+	quiet        bool
 }
 
 func run(args []string) error {
@@ -45,6 +49,21 @@ func run(args []string) error {
 			options.outputPath,
 		)
 
+	case commandInfo:
+		var info firmwareInfo
+
+		info, err = inspectFirmware(options.firmwarePath)
+		if err == nil {
+			err = printFirmwareInfo(
+				stdout,
+				info,
+				options.json,
+			)
+		}
+
+	case commandVerify:
+		err = verifyFirmware(options.firmwarePath)
+
 	default:
 		return fmt.Errorf(
 			"unsupported command: %s",
@@ -56,9 +75,7 @@ func run(args []string) error {
 		return err
 	}
 
-	printSuccess(stdout, options)
-
-	return nil
+	return printSuccess(stdout, options)
 }
 
 func parseOptions(args []string) (options, bool, error) {
@@ -73,6 +90,14 @@ func parseOptions(args []string) (options, bool, error) {
 
 		case string(commandExtract):
 			options.command = commandExtract
+			args = args[1:]
+
+		case string(commandInfo):
+			options.command = commandInfo
+			args = args[1:]
+
+		case string(commandVerify):
+			options.command = commandVerify
 			args = args[1:]
 		}
 	}
@@ -97,7 +122,9 @@ func parseOptions(args []string) (options, bool, error) {
 			return options, true, nil
 
 		case argument == "-v" || argument == "--version":
-			fmt.Fprintln(stdout, Version)
+			if _, err := fmt.Fprintln(stdout, Version); err != nil {
+				return options, false, err
+			}
 
 			return options, true, nil
 
@@ -125,6 +152,12 @@ func parseOptions(args []string) (options, bool, error) {
 				)
 			}
 
+		case argument == "--json":
+			options.json = true
+
+		case argument == "-q" || argument == "--quiet":
+			options.quiet = true
+
 		case strings.HasPrefix(argument, "-"):
 			return options, false, fmt.Errorf(
 				"unknown option: %s",
@@ -137,6 +170,26 @@ func parseOptions(args []string) (options, bool, error) {
 				argument,
 			)
 		}
+	}
+
+	if options.json && options.command != commandInfo {
+		return options, false, fmt.Errorf(
+			"--json is only supported by the info command",
+		)
+	}
+
+	if options.quiet && options.command != commandVerify {
+		return options, false, fmt.Errorf(
+			"--quiet is only supported by the verify command",
+		)
+	}
+
+	if options.outputPath != "" &&
+		options.command != commandReplace &&
+		options.command != commandExtract {
+		return options, false, fmt.Errorf(
+			"--output is only supported by replace and extract",
+		)
 	}
 
 	switch options.command {
@@ -180,6 +233,28 @@ func parseOptions(args []string) (options, bool, error) {
 				"the extracted image cannot overwrite the firmware",
 			)
 		}
+
+	case commandInfo:
+		if len(positional) != 1 {
+			printUsage(stderr)
+
+			return options, false, fmt.Errorf(
+				"info requires a firmware path",
+			)
+		}
+
+		options.firmwarePath = positional[0]
+
+	case commandVerify:
+		if len(positional) != 1 {
+			printUsage(stderr)
+
+			return options, false, fmt.Errorf(
+				"verify requires a firmware path",
+			)
+		}
+
+		options.firmwarePath = positional[0]
 	}
 
 	return options, false, nil
@@ -198,57 +273,71 @@ func samePath(first string, second string) bool {
 		filepath.Clean(secondPath)
 }
 
-func printSuccess(writer io.Writer, options options) {
+func printSuccess(
+	writer io.Writer,
+	options options,
+) error {
 	switch options.command {
 	case commandReplace:
-		fmt.Fprintf(
+		_, err := fmt.Fprintf(
 			writer,
 			"Boot logo replaced successfully: %s\n",
 			options.outputPath,
 		)
 
+		return err
+
 	case commandExtract:
-		fmt.Fprintf(
+		_, err := fmt.Fprintf(
 			writer,
 			"Boot logo extracted successfully: %s\n",
 			options.outputPath,
 		)
+
+		return err
+
+	case commandVerify:
+		if options.quiet {
+			return nil
+		}
+
+		_, err := fmt.Fprintf(
+			writer,
+			"Firmware verified successfully: %s\n",
+			options.firmwarePath,
+		)
+
+		return err
+
+	default:
+		return nil
 	}
 }
 
 func printUsage(writer io.Writer) {
-	fmt.Fprintln(writer, "Usage:")
-	fmt.Fprintln(
+	if _, err := fmt.Fprint(
 		writer,
-		"  boot-logo [options] [replace] <image> <firmware>",
-	)
-	fmt.Fprintln(
-		writer,
-		"  boot-logo [options] extract <firmware>",
-	)
-	fmt.Fprintln(writer)
-	fmt.Fprintln(writer, "Commands:")
-	fmt.Fprintln(
-		writer,
-		"  replace    Replace the firmware boot logo in-place (default)",
-	)
-	fmt.Fprintln(
-		writer,
-		"  extract    Extract the current firmware boot logo",
-	)
-	fmt.Fprintln(writer)
-	fmt.Fprintln(writer, "Options:")
-	fmt.Fprintln(
-		writer,
-		"  -o, --output <path>  Write to a different output path",
-	)
-	fmt.Fprintln(
-		writer,
-		"  -h, --help           Show usage information",
-	)
-	fmt.Fprintln(
-		writer,
-		"  -v, --version        Show version information",
-	)
-	fmt.Fprintln(writer)
+		`Usage:
+  boot-logo [options] [replace] <image> <firmware>
+  boot-logo [options] extract <firmware>
+  boot-logo [options] info <firmware>
+  boot-logo [options] verify <firmware>
+
+Commands:
+  replace    Replace the firmware boot logo in-place (default)
+  extract    Extract the current firmware boot logo
+  info       Show firmware and embedded boot logo information
+  verify     Verify that the firmware and boot logo are supported
+
+Options:
+  -o, --output <path>  Write to a different output path
+      --json           Print info as JSON
+  -q, --quiet          Suppress successful verify output
+  -h, --help           Show usage information
+  -v, --version        Show version information
+
+`,
+	); err != nil {
+		return
+	}
 }
