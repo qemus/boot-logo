@@ -262,6 +262,164 @@ func TestReplaceBootLogoFixturesSeparateOutput(t *testing.T) {
 	}
 }
 
+func TestReplaceBootLogoFixturesFromStandaloneFFS(t *testing.T) {
+	outputModes := []struct {
+		name     string
+		separate bool
+	}{
+		{name: "in place"},
+		{name: "separate output", separate: true},
+	}
+
+	for _, outputMode := range outputModes {
+		outputMode := outputMode
+
+		for _, fixture := range firmwareFixtures {
+			fixture := fixture
+
+			t.Run(outputMode.name+"/"+fixture.name, func(t *testing.T) {
+				directory := t.TempDir()
+				replacementPath, replacementData, replacementImage :=
+					createFixtureReplacementFFS(t, directory)
+				inputPath := filepath.Join(
+					directory,
+					"input-"+fixture.file,
+				)
+				original := copyFixture(
+					t,
+					fixture.file,
+					inputPath,
+					0o640,
+				)
+				originalLogoData := readLogoFileData(
+					t,
+					inputPath,
+				)
+
+				if bytes.Equal(
+					originalLogoData,
+					replacementData,
+				) {
+					t.Fatal(
+						"test precondition failed: destination LogoDxe already matches the replacement FFS",
+					)
+				}
+
+				outputPath := inputPath
+
+				if outputMode.separate {
+					outputPath = filepath.Join(
+						directory,
+						"output-"+fixture.file,
+					)
+				}
+
+				if err := replaceBootLogo(
+					replacementPath,
+					inputPath,
+					outputPath,
+				); err != nil {
+					t.Fatalf(
+						"replaceBootLogo() returned an error: %v",
+						err,
+					)
+				}
+
+				if outputMode.separate {
+					inputAfter, err := os.ReadFile(inputPath)
+					if err != nil {
+						t.Fatalf(
+							"read unchanged input: %v",
+							err,
+						)
+					}
+
+					if !bytes.Equal(inputAfter, original) {
+						t.Fatal(
+							"FFS replacement modified the input while using a separate output",
+						)
+					}
+				}
+
+				updated, err := os.ReadFile(outputPath)
+				if err != nil {
+					t.Fatalf(
+						"read FFS replacement output: %v",
+						err,
+					)
+				}
+
+				if bytes.Equal(updated, original) {
+					t.Fatal(
+						"FFS replacement did not modify the firmware",
+					)
+				}
+
+				info, err := os.Stat(outputPath)
+				if err != nil {
+					t.Fatalf(
+						"stat FFS replacement output: %v",
+						err,
+					)
+				}
+
+				if info.Mode().Perm() != 0o640 {
+					t.Fatalf(
+						"firmware mode = %#o, want %#o",
+						info.Mode().Perm(),
+						os.FileMode(0o640),
+					)
+				}
+
+				assertLogoFileData(
+					t,
+					outputPath,
+					replacementData,
+				)
+				assertFixtureReplacement(
+					t,
+					outputPath,
+					replacementImage,
+				)
+
+				if fixture.file == "test.ffs" &&
+					!bytes.Equal(updated, replacementData) {
+					t.Fatal(
+						"standalone FFS output does not exactly match the replacement FFS",
+					)
+				}
+			})
+		}
+	}
+}
+
+func TestReplaceBootLogoFileRejectsDifferentGUID(t *testing.T) {
+	replacementData := readFixture(t, "test.ffs")
+	replacementFile, ok := parseStandaloneFFS(replacementData)
+	if !ok {
+		t.Fatal("parseStandaloneFFS() rejected tests/test.ffs")
+	}
+
+	replacementFile.Header.GUID[0] ^= 0xff
+
+	err := replaceBootLogoFile(
+		replacementFile,
+		replacementData,
+		fixturePath("test.rom"),
+		filepath.Join(t.TempDir(), "output.rom"),
+	)
+	if err == nil {
+		t.Fatal("replaceBootLogoFile() accepted a non-LogoDxe FFS file")
+	}
+
+	if !strings.Contains(err.Error(), "replacement FFS GUID") {
+		t.Fatalf(
+			"replaceBootLogoFile() error = %q, want GUID error",
+			err,
+		)
+	}
+}
+
 func TestReplaceBootLogoFixturesFromSupportedFormats(t *testing.T) {
 	referenceData := readFixture(t, "test.bmp")
 	reference, err := decodeBitmap(referenceData)
@@ -562,6 +720,109 @@ func writeFixtureBitmap(t *testing.T, path string, source image.Image) {
 	}
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatalf("WriteFile() returned an error: %v", err)
+	}
+}
+
+func createFixtureReplacementFFS(
+	t *testing.T,
+	directory string,
+) (string, []byte, image.Image) {
+	t.Helper()
+
+	replacementPath := filepath.Join(
+		directory,
+		"replacement-source.bin",
+	)
+	original := copyFixture(
+		t,
+		"test.ffs",
+		replacementPath,
+		0o644,
+	)
+	replacementImage := fixtureReplacementImage(11, 7)
+	imagePath := filepath.Join(
+		directory,
+		"replacement-source.bmp",
+	)
+	writeFixtureBitmap(t, imagePath, replacementImage)
+
+	if err := replaceBootLogoImage(
+		imagePath,
+		replacementPath,
+		replacementPath,
+	); err != nil {
+		t.Fatalf(
+			"create replacement FFS: %v",
+			err,
+		)
+	}
+
+	replacementData, err := os.ReadFile(replacementPath)
+	if err != nil {
+		t.Fatalf(
+			"read replacement FFS: %v",
+			err,
+		)
+	}
+
+	if bytes.Equal(replacementData, original) {
+		t.Fatal("generated replacement FFS is unchanged")
+	}
+
+	replacementFile, ok := parseStandaloneFFS(replacementData)
+	if !ok {
+		t.Fatal("generated replacement is not a standalone FFS file")
+	}
+
+	if replacementFile.Header.GUID != logoFileGUID {
+		t.Fatalf(
+			"generated replacement GUID = %s, want %s",
+			replacementFile.Header.GUID.String(),
+			logoFileGUID.String(),
+		)
+	}
+
+	return replacementPath, replacementData, replacementImage
+}
+
+func readLogoFileData(
+	t *testing.T,
+	firmwarePath string,
+) []byte {
+	t.Helper()
+
+	firmware, err := readFirmware(firmwarePath)
+	if err != nil {
+		t.Fatalf(
+			"firmware cannot be parsed: %v",
+			err,
+		)
+	}
+
+	file, err := findLogoFile(firmware)
+	if err != nil {
+		t.Fatalf(
+			"firmware does not contain LogoDxe: %v",
+			err,
+		)
+	}
+
+	return append([]byte(nil), file.Buf()...)
+}
+
+func assertLogoFileData(
+	t *testing.T,
+	firmwarePath string,
+	expected []byte,
+) {
+	t.Helper()
+
+	actual := readLogoFileData(t, firmwarePath)
+
+	if !bytes.Equal(actual, expected) {
+		t.Fatal(
+			"destination LogoDxe FFS does not exactly match the replacement FFS",
+		)
 	}
 }
 
