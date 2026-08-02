@@ -20,7 +20,7 @@
       "matchDepNames": [
         "github.com/qemus/fiano"
       ],
-      "allowedVersions": "/^v\\d+\\.\\d+\\.\\d+-\\d+$/"
+      "allowedVersions": "/^v\\d+\\.\\d+\\.\\d+-\\d+$/",
       "ignoreUnstable": false
     }
   ],
