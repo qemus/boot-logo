@@ -111,6 +111,7 @@ func parseOptions(args []string) (options, bool, error) {
 					args[0],
 				)
 			}
+		}
 	}
 
 	var positional []string
