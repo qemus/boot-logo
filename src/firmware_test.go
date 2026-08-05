@@ -656,11 +656,20 @@ func TestReplaceBootLogoStandardROMResizes32MiBImage(t *testing.T) {
 		)
 	}
 
-	if err := replaceBootLogo(
+	var resizeInfo *logoResizeInfo
+
+	err = replaceBootLogoWithReporter(
 		imagePath,
 		fixturePath("standard.rom"),
 		outputPath,
-	); err != nil {
+		func(info logoResizeInfo) error {
+			reported := info
+			resizeInfo = &reported
+
+			return nil
+		},
+	)
+	if err != nil {
 		t.Fatalf(
 			"replaceBootLogo() returned an error: %v",
 			err,
@@ -680,6 +689,13 @@ func TestReplaceBootLogoStandardROMResizes32MiBImage(t *testing.T) {
 		t.Fatalf(
 			"updated standard ROM does not contain a logo: %v",
 			err,
+		)
+	}
+
+	if match.location.blockType != hiiImage24Bit {
+		t.Fatalf(
+			"resized HII image block type = %#x, want 24-bit",
+			match.location.blockType,
 		)
 	}
 
@@ -704,6 +720,34 @@ func TestReplaceBootLogoStandardROMResizes32MiBImage(t *testing.T) {
 
 	actualBounds := actual.Bounds()
 	replacementBounds := replacement.Bounds()
+
+	if resizeInfo == nil {
+		t.Fatal(
+			"replaceBootLogo() did not report resizing the oversized logo",
+		)
+	}
+
+	if resizeInfo.originalWidth != replacementBounds.Dx() ||
+		resizeInfo.originalHeight != replacementBounds.Dy() {
+		t.Fatalf(
+			"reported original logo dimensions = %dx%d, want %dx%d",
+			resizeInfo.originalWidth,
+			resizeInfo.originalHeight,
+			replacementBounds.Dx(),
+			replacementBounds.Dy(),
+		)
+	}
+
+	if resizeInfo.resizedWidth != actualBounds.Dx() ||
+		resizeInfo.resizedHeight != actualBounds.Dy() {
+		t.Fatalf(
+			"reported resized logo dimensions = %dx%d, want %dx%d",
+			resizeInfo.resizedWidth,
+			resizeInfo.resizedHeight,
+			actualBounds.Dx(),
+			actualBounds.Dy(),
+		)
+	}
 
 	if actualBounds.Dx() <= 0 ||
 		actualBounds.Dy() <= 0 {
