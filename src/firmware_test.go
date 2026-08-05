@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -12,7 +13,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/linuxboot/fiano/pkg/guid"
 	"github.com/linuxboot/fiano/pkg/uefi"
+	"github.com/linuxboot/fiano/pkg/visitors"
 )
 
 type fixtureImageFormat struct {
@@ -361,6 +364,371 @@ func TestReplaceBootLogoStandardROM(t *testing.T) {
 		t,
 		originalPE,
 		payload,
+	)
+}
+
+func TestReplaceBootLogoRegeneratesFirmwareVolumePadding(t *testing.T) {
+	const (
+		replacementWidth  = 180
+		replacementHeight = 116
+		alignedFileBase   = 128 << 10
+	)
+
+	originalErasePolarity := uefi.Attributes.ErasePolarity
+	uefi.Attributes.ErasePolarity = 0xff
+	t.Cleanup(func() {
+		uefi.Attributes.ErasePolarity = originalErasePolarity
+	})
+
+	sourceData := readFixture(t, "test.bmp")
+	source, err := decodeBitmap(sourceData)
+	if err != nil {
+		t.Fatalf(
+			"decode tests/test.bmp: %v",
+			err,
+		)
+	}
+
+	replacement := resizeFixtureImage(
+		t,
+		source,
+		replacementWidth,
+		replacementHeight,
+	)
+
+	block, palette, err := encodeHIIImage(replacement)
+	if err != nil {
+		t.Fatalf(
+			"encode replacement HII image: %v",
+			err,
+		)
+	}
+
+	if len(block) == 0 ||
+		block[0] != hiiImage24Bit ||
+		palette != nil {
+		t.Fatal(
+			"replacement is not encoded as a 24-bit HII image",
+		)
+	}
+
+	directory := t.TempDir()
+	inputPath := filepath.Join(
+		directory,
+		"input.fd",
+	)
+	outputPath := filepath.Join(
+		directory,
+		"output.fd",
+	)
+	imagePath := filepath.Join(
+		directory,
+		"replacement.bmp",
+	)
+	replacementFFSPath := filepath.Join(
+		directory,
+		"replacement.ffs",
+	)
+
+	writeFixtureBitmap(
+		t,
+		imagePath,
+		replacement,
+	)
+
+	createPaddingRegressionFirmware(
+		t,
+		inputPath,
+	)
+
+	copyFixture(
+		t,
+		"test.ffs",
+		replacementFFSPath,
+		0o644,
+	)
+
+	if err := replaceBootLogoImage(
+		imagePath,
+		replacementFFSPath,
+		replacementFFSPath,
+	); err != nil {
+		t.Fatalf(
+			"create expected replacement FFS: %v",
+			err,
+		)
+	}
+
+	expectedFFS := readFileForTest(
+		t,
+		replacementFFSPath,
+	)
+
+	initial := readFirmwareVolumeForTest(
+		t,
+		inputPath,
+	)
+
+	if len(initial.Files) != 3 {
+		t.Fatalf(
+			"initial firmware volume file count = %d, want 3",
+			len(initial.Files),
+		)
+	}
+
+	if initial.Files[0].Header.GUID != logoFileGUID {
+		t.Fatalf(
+			"initial first file GUID = %s, want %s",
+			initial.Files[0].Header.GUID.String(),
+			logoFileGUID.String(),
+		)
+	}
+
+	initialPad := initial.Files[1]
+	if initialPad.Header.Type != uefi.FVFileTypePad {
+		t.Fatalf(
+			"initial middle file type = %s, want %s",
+			initialPad.Header.Type.String(),
+			uefi.FVFileTypePad.String(),
+		)
+	}
+
+	alignedFile := initial.Files[2]
+	if alignment := alignedFile.Header.Attributes.GetAlignment(); alignment != alignedFileBase {
+		t.Fatalf(
+			"trailing file alignment = %d, want %d",
+			alignment,
+			alignedFileBase,
+		)
+	}
+
+	replacementFile, ok := parseStandaloneFFS(expectedFFS)
+	if !ok {
+		t.Fatal("expected replacement is not a standalone FFS file")
+	}
+
+	correctFileOffset := alignedFirmwareFileOffset(
+		initial.DataOffset+replacementFile.Header.ExtendedSize,
+		alignedFile,
+	)
+	correctEnd := correctFileOffset +
+		alignedFile.Header.ExtendedSize
+
+	if correctEnd > initial.Length {
+		t.Fatalf(
+			"regenerated layout requires %#x bytes, firmware volume has %#x",
+			correctEnd,
+			initial.Length,
+		)
+	}
+
+	stalePadOffset := uefi.Align8(
+		initial.DataOffset +
+			replacementFile.Header.ExtendedSize,
+	)
+	staleFileOffset := alignedFirmwareFileOffset(
+		stalePadOffset+
+			initialPad.Header.ExtendedSize,
+		alignedFile,
+	)
+	staleEnd := staleFileOffset +
+		alignedFile.Header.ExtendedSize
+
+	if staleEnd <= initial.Length {
+		t.Fatalf(
+			"test precondition failed: retained PAD layout uses %#x bytes and still fits in %#x",
+			staleEnd,
+			initial.Length,
+		)
+	}
+
+	if err := replaceBootLogo(
+		imagePath,
+		inputPath,
+		outputPath,
+	); err != nil {
+		t.Fatalf(
+			"replaceBootLogo() returned an error: %v",
+			err,
+		)
+	}
+
+	rebuilt := readFirmwareVolumeForTest(
+		t,
+		outputPath,
+	)
+
+	if len(rebuilt.Files) != 3 {
+		t.Fatalf(
+			"rebuilt firmware volume file count = %d, want 3",
+			len(rebuilt.Files),
+		)
+	}
+
+	if rebuilt.Files[0].Header.ExtendedSize != uint64(len(expectedFFS)) {
+		t.Fatalf(
+			"rebuilt LogoDxe size = %#x, want %#x",
+			rebuilt.Files[0].Header.ExtendedSize,
+			len(expectedFFS),
+		)
+	}
+
+	rebuiltPad := rebuilt.Files[1]
+	if rebuiltPad.Header.Type != uefi.FVFileTypePad {
+		t.Fatalf(
+			"rebuilt middle file type = %s, want %s",
+			rebuiltPad.Header.Type.String(),
+			uefi.FVFileTypePad.String(),
+		)
+	}
+
+	if rebuiltPad.Header.ExtendedSize >=
+		initialPad.Header.ExtendedSize {
+		t.Fatalf(
+			"rebuilt PAD size = %#x, want less than original %#x",
+			rebuiltPad.Header.ExtendedSize,
+			initialPad.Header.ExtendedSize,
+		)
+	}
+
+	assertFixtureReplacement(
+		t,
+		outputPath,
+		replacement,
+	)
+}
+
+func TestReplaceBootLogoStandardROMResizes32MiBImage(t *testing.T) {
+	const (
+		replacementWidth  = 4073
+		replacementHeight = 2746
+		minimumBitmapSize = 32 << 20
+		maximumBitmapSize = 33 << 20
+	)
+
+	sourceData := readFixture(t, "test.bmp")
+	source, err := decodeBitmap(sourceData)
+	if err != nil {
+		t.Fatalf(
+			"decode tests/test.bmp: %v",
+			err,
+		)
+	}
+
+	replacement := resizeFixtureImage(
+		t,
+		source,
+		replacementWidth,
+		replacementHeight,
+	)
+
+	directory := t.TempDir()
+	imagePath := filepath.Join(
+		directory,
+		"replacement.bmp",
+	)
+	outputPath := filepath.Join(
+		directory,
+		"standard.rom",
+	)
+
+	writeFixtureBitmap(
+		t,
+		imagePath,
+		replacement,
+	)
+
+	info, err := os.Stat(imagePath)
+	if err != nil {
+		t.Fatalf(
+			"stat generated replacement bitmap: %v",
+			err,
+		)
+	}
+
+	if info.Size() < minimumBitmapSize ||
+		info.Size() >= maximumBitmapSize {
+		t.Fatalf(
+			"generated replacement bitmap size = %d bytes, want at least %d and less than %d",
+			info.Size(),
+			minimumBitmapSize,
+			maximumBitmapSize,
+		)
+	}
+
+	if err := replaceBootLogo(
+		imagePath,
+		fixturePath("standard.rom"),
+		outputPath,
+	); err != nil {
+		t.Fatalf(
+			"replaceBootLogo() returned an error: %v",
+			err,
+		)
+	}
+
+	firmware, err := readFirmware(outputPath)
+	if err != nil {
+		t.Fatalf(
+			"updated standard ROM cannot be parsed: %v",
+			err,
+		)
+	}
+
+	match, err := findBootLogo(firmware)
+	if err != nil {
+		t.Fatalf(
+			"updated standard ROM does not contain a logo: %v",
+			err,
+		)
+	}
+
+	payload, err := sectionPayload(match.section)
+	if err != nil {
+		t.Fatalf(
+			"sectionPayload() returned an error: %v",
+			err,
+		)
+	}
+
+	actual, err := decodeHIIImage(
+		payload,
+		match.location,
+	)
+	if err != nil {
+		t.Fatalf(
+			"decode resized boot logo: %v",
+			err,
+		)
+	}
+
+	actualBounds := actual.Bounds()
+	replacementBounds := replacement.Bounds()
+
+	if actualBounds.Dx() <= 0 ||
+		actualBounds.Dy() <= 0 {
+		t.Fatalf(
+			"resized logo dimensions = %dx%d, want positive dimensions",
+			actualBounds.Dx(),
+			actualBounds.Dy(),
+		)
+	}
+
+	if actualBounds.Dx() >= replacementBounds.Dx() ||
+		actualBounds.Dy() >= replacementBounds.Dy() {
+		t.Fatalf(
+			"resized logo dimensions = %dx%d, want smaller than %dx%d",
+			actualBounds.Dx(),
+			actualBounds.Dy(),
+			replacementBounds.Dx(),
+			replacementBounds.Dy(),
+		)
+	}
+
+	assertFixtureAspectRatio(
+		t,
+		actualBounds,
+		replacementBounds,
 	)
 }
 
@@ -797,6 +1165,366 @@ func copyFixture(t *testing.T, name, destination string, mode os.FileMode) []byt
 		t.Fatalf("write fixture copy %q: %v", destination, err)
 	}
 	return data
+}
+
+func createPaddingRegressionFirmware(
+	t *testing.T,
+	path string,
+) {
+	t.Helper()
+
+	const (
+		firmwareVolumeSize = 0x21000
+		blockSize          = 0x1000
+		alignedFileSize    = 0x40
+	)
+
+	logoData := readFixture(
+		t,
+		"test.ffs",
+	)
+	logoFile, ok := parseStandaloneFFS(
+		logoData,
+	)
+	if !ok {
+		t.Fatal("tests/test.ffs is not a standalone FFS file")
+	}
+
+	alignedFile := newAlignedRawFile(
+		t,
+		"11111111-2222-3333-4444-555555555555",
+		alignedFileSize,
+		128<<10,
+	)
+
+	fv := &uefi.FirmwareVolume{}
+	fv.FileSystemGUID = *uefi.FFS2
+	fv.Signature = binary.LittleEndian.Uint32(
+		[]byte("_FVH"),
+	)
+	fv.Attributes = 0x0004feff
+	fv.Revision = 2
+	fv.Blocks = []uefi.Block{
+		{
+			Count: firmwareVolumeSize / blockSize,
+			Size:  blockSize,
+		},
+		{},
+	}
+	fv.HeaderLen = uint16(
+		uefi.FirmwareVolumeFixedHeaderSize +
+			binary.Size(uefi.Block{})*len(fv.Blocks),
+	)
+	fv.DataOffset = uint64(fv.HeaderLen)
+	fv.Length = firmwareVolumeSize
+	fv.Files = []*uefi.File{
+		logoFile,
+		alignedFile,
+	}
+
+	header := new(bytes.Buffer)
+	if err := binary.Write(
+		header,
+		binary.LittleEndian,
+		fv.FirmwareVolumeFixedHeader,
+	); err != nil {
+		t.Fatalf(
+			"write firmware volume header: %v",
+			err,
+		)
+	}
+
+	for _, block := range fv.Blocks {
+		if err := binary.Write(
+			header,
+			binary.LittleEndian,
+			block,
+		); err != nil {
+			t.Fatalf(
+				"write firmware volume block map: %v",
+				err,
+			)
+		}
+	}
+
+	buffer := header.Bytes()
+	sum, err := uefi.Checksum16(
+		buffer[:fv.HeaderLen],
+	)
+	if err != nil {
+		t.Fatalf(
+			"checksum firmware volume header: %v",
+			err,
+		)
+	}
+
+	binary.LittleEndian.PutUint16(
+		buffer[50:52],
+		0-sum,
+	)
+
+	empty := make(
+		[]byte,
+		fv.Length-uint64(len(buffer)),
+	)
+	uefi.Erase(
+		empty,
+		uefi.Attributes.ErasePolarity,
+	)
+	fv.SetBuf(
+		append(buffer, empty...),
+	)
+
+	if err := (&visitors.Assemble{}).Run(fv); err != nil {
+		t.Fatalf(
+			"assemble padding regression firmware: %v",
+			err,
+		)
+	}
+
+	if err := os.WriteFile(
+		path,
+		fv.Buf(),
+		0o644,
+	); err != nil {
+		t.Fatalf(
+			"write padding regression firmware: %v",
+			err,
+		)
+	}
+}
+
+func newAlignedRawFile(
+	t *testing.T,
+	fileGUID string,
+	size uint64,
+	alignment uint64,
+) *uefi.File {
+	t.Helper()
+
+	if alignment != 128<<10 {
+		t.Fatalf(
+			"unsupported test file alignment: %d",
+			alignment,
+		)
+	}
+
+	if size < uefi.FileHeaderMinLength {
+		t.Fatalf(
+			"raw file size = %#x, want at least %#x",
+			size,
+			uefi.FileHeaderMinLength,
+		)
+	}
+
+	file := &uefi.File{}
+	file.Header.GUID = *guid.MustParse(fileGUID)
+	file.Header.Type = uefi.FVFileTypeRaw
+	file.Header.Attributes = 0x02
+	file.Type = file.Header.Type.String()
+	file.SetSize(
+		size,
+		true,
+	)
+	file.Header.SetState(
+		uefi.FileStateValid,
+	)
+
+	data := make(
+		[]byte,
+		size-file.HeaderLen(),
+	)
+	for index := range data {
+		data[index] = byte(index)
+	}
+
+	if err := file.ChecksumAndAssemble(data); err != nil {
+		t.Fatalf(
+			"assemble aligned raw file: %v",
+			err,
+		)
+	}
+
+	file.Modified = false
+
+	return file
+}
+
+func alignedFirmwareFileOffset(
+	fileOffset uint64,
+	file *uefi.File,
+) uint64 {
+	alignedOffset := uefi.Align8(
+		fileOffset,
+	)
+	alignBase := file.Header.Attributes.GetAlignment()
+
+	if alignBase == 1 {
+		return alignedOffset
+	}
+
+	headerLength := file.HeaderLen()
+	fileDataOffset := uefi.Align(
+		alignedOffset+headerLength,
+		alignBase,
+	)
+	newOffset := fileDataOffset -
+		headerLength
+
+	if gap := newOffset - alignedOffset; gap >= 8 &&
+		gap < uefi.FileHeaderMinLength {
+		fileDataOffset = uefi.Align(
+			fileDataOffset+1,
+			alignBase,
+		)
+		newOffset = fileDataOffset -
+			headerLength
+	}
+
+	return newOffset
+}
+
+func readFirmwareVolumeForTest(
+	t *testing.T,
+	path string,
+) *uefi.FirmwareVolume {
+	t.Helper()
+
+	data := readFileForTest(
+		t,
+		path,
+	)
+
+	fv, err := uefi.NewFirmwareVolume(
+		data,
+		0,
+		false,
+	)
+	if err != nil {
+		t.Fatalf(
+			"parse firmware volume %q: %v",
+			path,
+			err,
+		)
+	}
+
+	return fv
+}
+
+func readFileForTest(
+	t *testing.T,
+	path string,
+) []byte {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf(
+			"read file %q: %v",
+			path,
+			err,
+		)
+	}
+
+	if len(data) == 0 {
+		t.Fatalf(
+			"file %q is empty",
+			path,
+		)
+	}
+
+	return data
+}
+
+func resizeFixtureImage(
+	t *testing.T,
+	source image.Image,
+	width int,
+	height int,
+) *image.NRGBA {
+	t.Helper()
+
+	if source == nil {
+		t.Fatal("source image is nil")
+	}
+
+	sourceBounds := source.Bounds()
+	sourceWidth := sourceBounds.Dx()
+	sourceHeight := sourceBounds.Dy()
+
+	if sourceWidth <= 0 || sourceHeight <= 0 {
+		t.Fatalf(
+			"source dimensions = %dx%d, want positive dimensions",
+			sourceWidth,
+			sourceHeight,
+		)
+	}
+
+	if width <= 0 || height <= 0 {
+		t.Fatalf(
+			"destination dimensions = %dx%d, want positive dimensions",
+			width,
+			height,
+		)
+	}
+
+	output := image.NewNRGBA(
+		image.Rect(0, 0, width, height),
+	)
+
+	for y := 0; y < height; y++ {
+		sourceY := sourceBounds.Min.Y +
+			y*sourceHeight/height
+
+		for x := 0; x < width; x++ {
+			sourceX := sourceBounds.Min.X +
+				x*sourceWidth/width
+
+			output.Set(
+				x,
+				y,
+				source.At(sourceX, sourceY),
+			)
+		}
+	}
+
+	return output
+}
+
+func assertFixtureAspectRatio(
+	t *testing.T,
+	actual image.Rectangle,
+	expected image.Rectangle,
+) {
+	t.Helper()
+
+	actualWidth := actual.Dx()
+	actualHeight := actual.Dy()
+	expectedWidth := expected.Dx()
+	expectedHeight := expected.Dy()
+
+	difference :=
+		actualWidth*expectedHeight -
+			actualHeight*expectedWidth
+
+	if difference < 0 {
+		difference = -difference
+	}
+
+	tolerance := expectedWidth
+	if expectedHeight > tolerance {
+		tolerance = expectedHeight
+	}
+
+	if difference > tolerance {
+		t.Fatalf(
+			"resized logo aspect ratio %dx%d differs from source %dx%d",
+			actualWidth,
+			actualHeight,
+			expectedWidth,
+			expectedHeight,
+		)
+	}
 }
 
 func fixtureReplacementImage(width, height int) *image.NRGBA {
