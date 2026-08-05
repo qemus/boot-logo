@@ -60,6 +60,10 @@ var errHIIResourceNotFound = errors.New(
 	"HII resource was not found",
 )
 
+var errHIIImagePackageTooLarge = errors.New(
+	"updated HII image package is too large",
+)
+
 type peSectionInfo struct {
 	name           string
 	headerOffset   int
@@ -1011,6 +1015,36 @@ func replaceHIIImage(
 		return nil, err
 	}
 
+	return replaceHIIImageBlock(
+		data,
+		location,
+		newBlock,
+		newPalette,
+	)
+}
+
+func replaceHIIImageBlock(
+	data []byte,
+	location hiiImageLocation,
+	newBlock []byte,
+	newPalette []byte,
+) ([]byte, error) {
+	if len(newBlock) == 0 {
+		return nil, fmt.Errorf(
+			"HII image block is empty",
+		)
+	}
+
+	newBlock = append(
+		[]byte(nil),
+		newBlock...,
+	)
+
+	newPalette = append(
+		[]byte(nil),
+		newPalette...,
+	)
+
 	resource := location.resource
 
 	resourceStart := resource.dataOffset
@@ -1068,6 +1102,7 @@ func replaceHIIImage(
 	var (
 		paletteCount int
 		paletteEnd   int
+		err          error
 	)
 
 	if newPalette != nil {
@@ -1217,10 +1252,17 @@ func replaceHIIImage(
 
 	newPackageLength := len(newPackage)
 
-	if newPackageLength < hiiImagePackageHeaderSize ||
-		newPackageLength > maxUint24Value {
+	if newPackageLength < hiiImagePackageHeaderSize {
 		return nil, fmt.Errorf(
-			"updated HII image package is too large: %d bytes",
+			"updated HII image package is too small: %d bytes",
+			newPackageLength,
+		)
+	}
+
+	if newPackageLength > maxUint24Value {
+		return nil, fmt.Errorf(
+			"%w: %d bytes",
+			errHIIImagePackageTooLarge,
 			newPackageLength,
 		)
 	}
