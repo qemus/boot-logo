@@ -228,6 +228,12 @@ func planLogoFile(
 	found := false
 
 	for _, section := range file.Sections {
+		if section == nil {
+			return nil, fmt.Errorf(
+				"LogoDxe file contains a nil top-level section",
+			)
+		}
+
 		for count := uefi.Align4(dataLength) - dataLength; count > 0; count-- {
 			fileData = append(fileData, 0)
 		}
