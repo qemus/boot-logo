@@ -7,6 +7,49 @@ import (
 	"testing"
 )
 
+func TestNewLogoResizeReporter(t *testing.T) {
+	var output bytes.Buffer
+
+	reporter := newLogoResizeReporter(
+		&output,
+		false,
+	)
+	if reporter == nil {
+		t.Fatal("newLogoResizeReporter() returned nil")
+	}
+
+	err := reporter(logoResizeInfo{
+		originalWidth:  3840,
+		originalHeight: 2160,
+		resizedWidth:   742,
+		resizedHeight:  417,
+	})
+	if err != nil {
+		t.Fatalf(
+			"resize reporter returned an error: %v",
+			err,
+		)
+	}
+
+	want := "Logo resolution 3840x2160 exceeds the available firmware space. Resizing to 742x417 to fit.\n"
+	if output.String() != want {
+		t.Fatalf(
+			"resize report = %q, want %q",
+			output.String(),
+			want,
+		)
+	}
+
+	if quietReporter := newLogoResizeReporter(
+		&output,
+		true,
+	); quietReporter != nil {
+		t.Fatal(
+			"newLogoResizeReporter() returned a reporter in quiet mode",
+		)
+	}
+}
+
 func TestParseOptionsDefaultReplace(t *testing.T) {
 	result, handled, err := parseOptions([]string{
 		"logo.bmp",
