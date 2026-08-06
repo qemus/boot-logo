@@ -1035,16 +1035,6 @@ func replaceHIIImageBlock(
 		)
 	}
 
-	newBlock = append(
-		[]byte(nil),
-		newBlock...,
-	)
-
-	newPalette = append(
-		[]byte(nil),
-		newPalette...,
-	)
-
 	resource := location.resource
 
 	resourceStart := resource.dataOffset
@@ -1102,12 +1092,19 @@ func replaceHIIImageBlock(
 	var (
 		paletteCount int
 		paletteEnd   int
+		paletteIndex byte
 		err          error
 	)
 
 	if newPalette != nil {
+		if len(newBlock) < 2 {
+			return nil, fmt.Errorf(
+				"HII palette image block is incomplete",
+			)
+		}
+
 		if paletteInfoOffset == 0 {
-			newBlock[1] = 1
+			paletteIndex = 1
 		} else {
 			paletteCount, paletteEnd, err = inspectHIIPaletteInfo(
 				oldPackage,
@@ -1123,7 +1120,7 @@ func replaceHIIImageBlock(
 				)
 			}
 
-			newBlock[1] = byte(paletteCount + 1)
+			paletteIndex = byte(paletteCount + 1)
 		}
 	}
 
@@ -1142,6 +1139,10 @@ func replaceHIIImageBlock(
 		newPackage,
 		newBlock...,
 	)
+
+	if newPalette != nil {
+		newPackage[blockRelativeStart+1] = paletteIndex
+	}
 
 	newPackage = append(
 		newPackage,
