@@ -25,6 +25,28 @@ type options struct {
 	quiet        bool
 }
 
+func newLogoResizeReporter(
+	writer io.Writer,
+	quiet bool,
+) func(logoResizeInfo) error {
+	if quiet {
+		return nil
+	}
+
+	return func(info logoResizeInfo) error {
+		_, err := fmt.Fprintf(
+			writer,
+			"Logo resolution %dx%d exceeds the available firmware space. Resizing to %dx%d to fit.\n",
+			info.originalWidth,
+			info.originalHeight,
+			info.resizedWidth,
+			info.resizedHeight,
+		)
+
+		return err
+	}
+}
+
 func run(args []string) error {
 	options, handled, err := parseOptions(args)
 	if err != nil {
@@ -37,10 +59,16 @@ func run(args []string) error {
 
 	switch options.command {
 	case commandReplace:
-		err = replaceBootLogo(
+		reporter := newLogoResizeReporter(
+			stdout,
+			options.quiet,
+		)
+
+		err = replaceBootLogoWithReporter(
 			options.imagePath,
 			options.firmwarePath,
 			options.outputPath,
+			reporter,
 		)
 
 	case commandExtract:

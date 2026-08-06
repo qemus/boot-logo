@@ -34,6 +34,20 @@ func replaceBootLogo(
 	firmwarePath string,
 	outputPath string,
 ) error {
+	return replaceBootLogoWithReporter(
+		replacementPath,
+		firmwarePath,
+		outputPath,
+		nil,
+	)
+}
+
+func replaceBootLogoWithReporter(
+	replacementPath string,
+	firmwarePath string,
+	outputPath string,
+	reporter func(logoResizeInfo) error,
+) error {
 	replacementData, err := os.ReadFile(replacementPath)
 	if err != nil {
 		return fmt.Errorf(
@@ -54,10 +68,11 @@ func replaceBootLogo(
 		)
 	}
 
-	return replaceBootLogoImage(
+	return replaceBootLogoImageWithReporter(
 		replacementPath,
 		firmwarePath,
 		outputPath,
+		reporter,
 	)
 }
 
@@ -127,6 +142,20 @@ func replaceBootLogoImage(
 	firmwarePath string,
 	outputPath string,
 ) error {
+	return replaceBootLogoImageWithReporter(
+		imagePath,
+		firmwarePath,
+		outputPath,
+		nil,
+	)
+}
+
+func replaceBootLogoImageWithReporter(
+	imagePath string,
+	firmwarePath string,
+	outputPath string,
+	reporter func(logoResizeInfo) error,
+) error {
 	bitmap, err := readBitmap(imagePath)
 	if err != nil {
 		return err
@@ -155,16 +184,26 @@ func replaceBootLogoImage(
 		return err
 	}
 
-	updatedPE, err := replaceHIIImage(
+	planned, err := planBootLogoReplacement(
+		firmware,
+		match,
 		peImage,
-		match.location,
 		source,
 	)
 	if err != nil {
 		return fmt.Errorf(
-			"replace HII boot logo: %w",
+			"plan HII boot logo replacement: %w",
 			err,
 		)
+	}
+
+	if planned.resizeInfo != nil && reporter != nil {
+		if err := reporter(*planned.resizeInfo); err != nil {
+			return fmt.Errorf(
+				"report resized boot logo: %w",
+				err,
+			)
+		}
 	}
 
 	replacer := &visitors.ReplacePE32{
@@ -176,7 +215,7 @@ func replaceBootLogoImage(
 
 			return file.Header.GUID == logoFileGUID
 		},
-		NewPE32: updatedPE,
+		NewPE32: planned.peImage,
 	}
 
 	if err := replacer.Run(firmware); err != nil {
