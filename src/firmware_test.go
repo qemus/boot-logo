@@ -265,6 +265,98 @@ func TestReplaceBootLogoFixturesSeparateOutput(t *testing.T) {
 	}
 }
 
+func TestReplaceBootLogoOnlyUpdatesMatchedPE32Section(t *testing.T) {
+	directory := t.TempDir()
+	inputPath := filepath.Join(
+		directory,
+		"input.ffs",
+	)
+	outputPath := filepath.Join(
+		directory,
+		"output.ffs",
+	)
+	imagePath := filepath.Join(
+		directory,
+		"replacement.bmp",
+	)
+
+	extraPE := createLogoFileWithExtraPE32(
+		t,
+		inputPath,
+	)
+	replacement := fixtureReplacementImage(
+		7,
+		5,
+	)
+	writeFixtureBitmap(
+		t,
+		imagePath,
+		replacement,
+	)
+
+	if err := replaceBootLogoImage(
+		imagePath,
+		inputPath,
+		outputPath,
+	); err != nil {
+		t.Fatalf(
+			"replaceBootLogoImage() returned an error: %v",
+			err,
+		)
+	}
+
+	firmware, err := readFirmware(outputPath)
+	if err != nil {
+		t.Fatalf(
+			"read updated firmware: %v",
+			err,
+		)
+	}
+
+	file, ok := firmware.(*uefi.File)
+	if !ok {
+		t.Fatalf(
+			"updated firmware is %T, want *uefi.File",
+			firmware,
+		)
+	}
+
+	if len(file.Sections) == 0 {
+		t.Fatal(
+			"updated LogoDxe contains no sections",
+		)
+	}
+
+	extraSection := file.Sections[len(file.Sections)-1]
+	if extraSection.Header.Type != uefi.SectionTypePE32 {
+		t.Fatalf(
+			"extra section type = %s, want %s",
+			extraSection.Header.Type.String(),
+			uefi.SectionTypePE32.String(),
+		)
+	}
+
+	updatedExtraPE, err := sectionPayload(extraSection)
+	if err != nil {
+		t.Fatalf(
+			"read extra PE32 section: %v",
+			err,
+		)
+	}
+
+	if !bytes.Equal(updatedExtraPE, extraPE) {
+		t.Fatal(
+			"replacement modified an unrelated PE32 section in LogoDxe",
+		)
+	}
+
+	assertFixtureReplacement(
+		t,
+		outputPath,
+		replacement,
+	)
+}
+
 func TestReplaceBootLogoStandardROM(t *testing.T) {
 	originalPE := readBootLogoPE(
 		t,
@@ -1209,6 +1301,131 @@ func copyFixture(t *testing.T, name, destination string, mode os.FileMode) []byt
 		t.Fatalf("write fixture copy %q: %v", destination, err)
 	}
 	return data
+}
+
+func createLogoFileWithExtraPE32(
+	t *testing.T,
+	path string,
+) []byte {
+	t.Helper()
+
+	logoData := readFixture(
+		t,
+		"test.ffs",
+	)
+	logoFile, ok := parseStandaloneFFS(
+		logoData,
+	)
+	if !ok {
+		t.Fatal(
+			"tests/test.ffs is not a standalone FFS file",
+		)
+	}
+
+	match, err := findBootLogo(logoFile)
+	if err != nil {
+		t.Fatalf(
+			"find boot logo in tests/test.ffs: %v",
+			err,
+		)
+	}
+
+	payload, err := sectionPayload(match.section)
+	if err != nil {
+		t.Fatalf(
+			"read LogoDxe PE32 payload: %v",
+			err,
+		)
+	}
+
+	extraPE := append(
+		[]byte(nil),
+		payload...,
+	)
+	resource, err := findHIIResource(extraPE)
+	if err != nil {
+		t.Fatalf(
+			"find HII resource in extra PE32: %v",
+			err,
+		)
+	}
+
+	resourceDirectoryOffset :=
+		resource.directorySizeOffset - 4
+	if resourceDirectoryOffset < 0 ||
+		resource.directorySizeOffset+4 > len(extraPE) {
+		t.Fatal(
+			"PE resource directory entry is outside the image",
+		)
+	}
+
+	for index := resourceDirectoryOffset; index < resource.directorySizeOffset+4; index++ {
+		extraPE[index] = 0
+	}
+
+	images, err := findHIIImages(extraPE)
+	if err != nil {
+		t.Fatalf(
+			"inspect extra PE32 after removing its resource directory: %v",
+			err,
+		)
+	}
+	if len(images) != 0 {
+		t.Fatalf(
+			"extra PE32 contains %d HII images, want none",
+			len(images),
+		)
+	}
+
+	extraSection := &uefi.Section{}
+	extraSection.Header.Type = uefi.SectionTypePE32
+	extraSection.SetBuf(extraPE)
+	if err := extraSection.GenSecHeader(); err != nil {
+		t.Fatalf(
+			"assemble extra PE32 section: %v",
+			err,
+		)
+	}
+
+	logoFile.Sections = append(
+		logoFile.Sections,
+		extraSection,
+	)
+	logoFile.Modified = true
+
+	if err := (&visitors.Assemble{}).Run(logoFile); err != nil {
+		t.Fatalf(
+			"assemble LogoDxe with extra PE32: %v",
+			err,
+		)
+	}
+
+	if err := os.WriteFile(
+		path,
+		logoFile.Buf(),
+		0o644,
+	); err != nil {
+		t.Fatalf(
+			"write LogoDxe with extra PE32: %v",
+			err,
+		)
+	}
+
+	parsed, err := readFirmware(path)
+	if err != nil {
+		t.Fatalf(
+			"read LogoDxe with extra PE32: %v",
+			err,
+		)
+	}
+	if _, err := findBootLogo(parsed); err != nil {
+		t.Fatalf(
+			"find boot logo with extra PE32 present: %v",
+			err,
+		)
+	}
+
+	return extraPE
 }
 
 func createPaddingRegressionFirmware(

@@ -206,47 +206,15 @@ func replaceBootLogoImageWithReporter(
 		}
 	}
 
-	replacer := &visitors.ReplacePE32{
-		Predicate: func(candidate uefi.Firmware) bool {
-			file, ok := candidate.(*uefi.File)
-			if !ok {
-				return false
-			}
+	match.section.SetBuf(planned.peImage)
+	match.section.Encapsulated = nil
 
-			return file.Header.GUID == logoFileGUID
-		},
-		NewPE32: planned.peImage,
-	}
-
-	if err := replacer.Run(firmware); err != nil {
+	if err := match.section.GenSecHeader(); err != nil {
 		return fmt.Errorf(
 			"replace LogoDxe PE32 section: %w",
 			err,
 		)
 	}
-
-	if len(replacer.Matches) == 0 {
-		return fmt.Errorf(
-			"LogoDxe PE32 section was not replaced",
-		)
-	}
-
-	if len(replacer.Matches) > 1 {
-		return fmt.Errorf(
-			"multiple LogoDxe PE32 sections were replaced: %d",
-			len(replacer.Matches),
-		)
-	}
-
-	matchedFile, ok := replacer.Matches[0].(*uefi.File)
-	if !ok {
-		return fmt.Errorf(
-			"matched LogoDxe object is %T, want *uefi.File",
-			replacer.Matches[0],
-		)
-	}
-
-	matchedFile.Modified = true
 
 	return assembleAndWriteFirmware(
 		firmware,
