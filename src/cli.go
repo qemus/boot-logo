@@ -111,38 +111,8 @@ func parseOptions(args []string) (options, bool, error) {
 		command: commandReplace,
 	}
 
-	if len(args) > 0 {
-		switch args[0] {
-		case string(commandReplace):
-			args = args[1:]
-
-		case string(commandExtract):
-			options.command = commandExtract
-			args = args[1:]
-
-		case string(commandInfo):
-			options.command = commandInfo
-			args = args[1:]
-
-		case string(commandVerify):
-			options.command = commandVerify
-			args = args[1:]
-
-		default:
-			// Treat a dotless *word* as a command, but allow explicit paths
-			// (e.g. ./logo or dir/logo) to be used as image/firmware paths.
-			if looksLikeCommand(args[0]) && !strings.ContainsAny(args[0], `/\\`) {
-				printUsage(stderr)
-
-				return options, false, fmt.Errorf(
-					"unknown command: %s",
-					args[0],
-				)
-			}
-		}
-	}
-
 	var positional []string
+	commandSeen := false
 
 	for index := 0; index < len(args); index++ {
 		argument := args[index]
@@ -205,6 +175,40 @@ func parseOptions(args []string) (options, bool, error) {
 			)
 
 		default:
+			if !commandSeen && len(positional) == 0 {
+				switch argument {
+				case string(commandReplace):
+					commandSeen = true
+					continue
+
+				case string(commandExtract):
+					options.command = commandExtract
+					commandSeen = true
+					continue
+
+				case string(commandInfo):
+					options.command = commandInfo
+					commandSeen = true
+					continue
+
+				case string(commandVerify):
+					options.command = commandVerify
+					commandSeen = true
+					continue
+				}
+
+				// Treat a dotless *word* as a command, but allow explicit paths
+				// (e.g. ./logo or dir/logo) to be used as image/firmware paths.
+				if looksLikeCommand(argument) && !strings.ContainsAny(argument, `/\\`) {
+					printUsage(stderr)
+
+					return options, false, fmt.Errorf(
+						"unknown command: %s",
+						argument,
+					)
+				}
+			}
+
 			positional = append(
 				positional,
 				argument,
