@@ -8,7 +8,7 @@ require (
 	golang.org/x/image v0.44.0
 )
 
-replace github.com/linuxboot/fiano => github.com/qemus/fiano v1.2.0-2
+replace github.com/linuxboot/fiano => github.com/qemus/fiano v1.2.0-3
 
 require (
 	github.com/pierrec/lz4 v2.6.1+incompatible // indirect
