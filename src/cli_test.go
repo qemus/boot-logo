@@ -139,6 +139,123 @@ func TestParseOptionsExplicitReplace(t *testing.T) {
 	}
 }
 
+func TestParseOptionsAllowsOptionsBeforeCommand(t *testing.T) {
+	tests := []struct {
+		name         string
+		args         []string
+		wantCommand  command
+		wantImage    string
+		wantFirmware string
+		wantJSON     bool
+		wantQuiet    bool
+	}{
+		{
+			name: "replace",
+			args: []string{
+				"--quiet",
+				"replace",
+				"logo.bmp",
+				"firmware.fd",
+			},
+			wantCommand:  commandReplace,
+			wantImage:    "logo.bmp",
+			wantFirmware: "firmware.fd",
+			wantQuiet:    true,
+		},
+		{
+			name: "extract",
+			args: []string{
+				"--quiet",
+				"extract",
+				"firmware.fd",
+			},
+			wantCommand:  commandExtract,
+			wantFirmware: "firmware.fd",
+			wantQuiet:    true,
+		},
+		{
+			name: "info",
+			args: []string{
+				"--json",
+				"info",
+				"firmware.fd",
+			},
+			wantCommand:  commandInfo,
+			wantFirmware: "firmware.fd",
+			wantJSON:     true,
+		},
+		{
+			name: "verify",
+			args: []string{
+				"--quiet",
+				"verify",
+				"firmware.fd",
+			},
+			wantCommand:  commandVerify,
+			wantFirmware: "firmware.fd",
+			wantQuiet:    true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result, handled, err := parseOptions(test.args)
+			if err != nil {
+				t.Fatalf(
+					"parseOptions() returned an error: %v",
+					err,
+				)
+			}
+
+			if handled {
+				t.Fatal(
+					"parseOptions() unexpectedly handled the command",
+				)
+			}
+
+			if result.command != test.wantCommand {
+				t.Errorf(
+					"command = %q, want %q",
+					result.command,
+					test.wantCommand,
+				)
+			}
+
+			if result.imagePath != test.wantImage {
+				t.Errorf(
+					"imagePath = %q, want %q",
+					result.imagePath,
+					test.wantImage,
+				)
+			}
+
+			if result.firmwarePath != test.wantFirmware {
+				t.Errorf(
+					"firmwarePath = %q, want %q",
+					result.firmwarePath,
+					test.wantFirmware,
+				)
+			}
+
+			if result.json != test.wantJSON {
+				t.Errorf(
+					"json = %t, want %t",
+					result.json,
+					test.wantJSON,
+				)
+			}
+
+			if result.quiet != test.wantQuiet {
+				t.Errorf(
+					"quiet = %t, want %t",
+					result.quiet,
+					test.wantQuiet,
+				)
+			}
+		})
+	}
+}
+
 func TestParseOptionsOutputEqualsSyntax(t *testing.T) {
 	result, handled, err := parseOptions([]string{
 		"--output=modified.fd",
