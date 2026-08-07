@@ -433,10 +433,19 @@ func findBootLogo(
 		return logoMatch{}, err
 	}
 
-	if finder.files == 0 {
+	switch finder.files {
+	case 0:
 		return logoMatch{}, fmt.Errorf(
 			"LogoDxe file %s was not found",
 			logoFileGUID.String(),
+		)
+
+	case 1:
+
+	default:
+		return logoMatch{}, fmt.Errorf(
+			"multiple LogoDxe files were found: %d",
+			finder.files,
 		)
 	}
 
