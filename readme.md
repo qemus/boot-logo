@@ -21,9 +21,9 @@ A small command-line utility for extracting and replacing the boot logo embedded
 - Displays firmware and embedded logo information
 - Available for both AMD64 and ARM64 platforms
 
-## Usage
+## Usage 🚀
 
-### Replace the boot logo
+### Replace the boot logo 🖼️
 
 ```bash
 boot-logo logo.png firmware.fd
@@ -39,7 +39,7 @@ To write the modified firmware to a different file instead:
 boot-logo replace logo.jpg firmware.fd --output modified.fd
 ```
 
-### Extract the boot logo
+### Extract the boot logo 📤
 
 ```bash
 boot-logo extract firmware.fd
@@ -63,7 +63,7 @@ A logo can also be extracted from a standalone FFS file:
 boot-logo extract LogoDxe.ffs
 ```
 
-### Show firmware information
+### Show firmware information ℹ️
 
 ```bash
 boot-logo info firmware.fd
@@ -104,7 +104,7 @@ The command also supports standalone FFS files:
 boot-logo info LogoDxe.ffs
 ```
 
-### Verify firmware compatibility
+### Verify firmware compatibility ✅
 
 ```bash
 boot-logo verify firmware.fd
@@ -125,7 +125,7 @@ Firmware verified successfully: firmware.fd
 
 The command exits with a non-zero status and prints an error when verification fails, making it suitable for scripts and CI workflows.
 
-### Options
+### Options ⚙️
 
 ```text
 -o, --output <path>  Write to a different output path
@@ -135,7 +135,7 @@ The command exits with a non-zero status and prints an error when verification f
 -v, --version        Show version information
 ```
 
-## Firmware support
+## Firmware support 💾
 
 The tool supports complete OVMF firmware images and standalone FFS files containing the standard TianoCore `LogoDxe` file:
 
@@ -145,7 +145,7 @@ F74D20EE-37E7-48FC-97F7-9B1047749C69
 
 The tool expects exactly one valid bitmap inside this file. Firmware that does not match this layout is rejected instead of being modified blindly.
 
-## Installation
+## Installation 📦
 
 Download the binary for your architecture from the [latest release][release_url]:
 
